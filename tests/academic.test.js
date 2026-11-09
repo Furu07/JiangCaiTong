@@ -237,8 +237,8 @@
       '学期切换选择独立的有效缓存');
     modeSync = 'network';
     await expectFailure(() => reopened.bind({ ...candidate, accountKey: 'another-owner' }), 'request');
-    check(reopened.snapshot().state === 'reauthorize' && reopened.snapshot().selected === second,
-      '新账号未验证成功时未替换旧账号绑定');
+    check(reopened.snapshot().state === 'unbound' && reopened.snapshot().entry === null,
+      '新账号未验证成功时隐藏旧账号课表');
 
     result.textContent = tests.join('\n') + '\n' + tests.length + ' checks passed';
     result.dataset.status = 'pass';

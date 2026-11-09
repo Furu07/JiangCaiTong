@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.5.6';
+const APP_VERSION = '0.5.7';
 const $ = id => document.getElementById(id);
 const tabs = Array.from(document.querySelectorAll('[data-tab]'));
 const native = window.Android;
@@ -677,15 +677,27 @@ async function receiveSchoolAuthorization(restore) {
     showSchoolStatus();
     return;
   }
+  let previousTerm = '';
   try {
     const candidate = await (restore ? schoolTransport.resumeAuthorization() : schoolTransport.completeAuthorization());
     if (candidate) {
+      previousTerm = $('term').value;
+      if (previousTerm.startsWith(schoolPrefix)) {
+        snapshot = null;
+        empty($('schedule'));
+        empty($('week'));
+        $('scheduleStatus').textContent = '正在核验教务授权…';
+      }
       await (restore ? schoolSync.restore(candidate) : schoolSync.bind(candidate));
       const selected = schoolSync.snapshot().selected;
       if (selected) renderTermOptions(schoolPrefix + selected);
     }
     showSchoolStatus();
   } catch (error) {
+    if (previousTerm.startsWith(schoolPrefix)) {
+      const selected = schoolSync.snapshot().selected;
+      renderTermOptions(selected ? schoolPrefix + selected : '');
+    }
     $('academicBindingState').textContent = error.message;
   }
 }

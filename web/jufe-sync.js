@@ -17,7 +17,7 @@
         if (!saved || typeof saved.accountKey !== 'string' || !saved.accountKey || !Array.isArray(saved.terms)) return null;
         const terms = saved.terms.map(Academic.normalizeTerm);
         if (!terms.some(term => term.termId === saved.selected)) return null;
-        return { accountKey: saved.accountKey, terms, selected: saved.selected };
+        return { accountKey: saved.accountKey, terms, selected: saved.selected, suspended: saved.suspended === true };
       } catch (error) {
         return null;
       }
@@ -31,7 +31,8 @@
     function snapshot() {
       const session = adapter.status();
       // An in-progress switch must never expose a different account's cached data.
-      const visible = binding && (!session.accountKey || session.accountKey === binding.accountKey);
+      const visible = binding && !binding.suspended
+        && (!session.accountKey || session.accountKey === binding.accountKey);
       return {
         terms: visible ? binding.terms : [],
         selected: visible ? binding.selected : '',
@@ -54,6 +55,10 @@
 
     function bind(candidate) {
       return start('bind:' + candidate.accountKey, async () => {
+        if (binding && binding.accountKey !== candidate.accountKey && !binding.suspended) {
+          // A failed switch must not expose the previous owner's data, even after reopening.
+          publish({ ...binding, suspended: true });
+        }
         adapter.authorize(candidate);
         const initial = adapter.status();
         try {
@@ -100,7 +105,7 @@
     }
 
     function restore(candidate) {
-      if (!binding || candidate.accountKey !== binding.accountKey) return bind(candidate);
+      if (!binding || binding.suspended || candidate.accountKey !== binding.accountKey) return bind(candidate);
       if (inflight) return Promise.reject(new Error('已有课表同步正在运行'));
       adapter.authorize(candidate);
       return resume();

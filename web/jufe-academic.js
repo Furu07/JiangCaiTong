@@ -6,9 +6,13 @@
   // The portal label and the published calendar are independent evidence.
   // https://jwc.jxufe.edu.cn/news-show-2056.html
   // https://jwc.jxufe.edu.cn/news-show-2054.html
+  // https://jwc.jxufe.edu.cn/news-show-1974.html
   const portalTerms = new Map([
     ['2026-2027学年第一学期', {
       id: '261', label: '2026-2027学年第一学期', firstMonday: '2026-09-07', totalWeeks: 19
+    }],
+    ['2025-2026学年第二学期', {
+      id: '252', label: '2025-2026学年第二学期', firstMonday: '2026-03-02', totalWeeks: 19
     }]
   ]);
 
