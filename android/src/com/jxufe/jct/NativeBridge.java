@@ -41,24 +41,33 @@ public final class NativeBridge {
     }
 
     @JavascriptInterface
-    public void req2(int id, String method, String url, String body, String referer, String headers) {
+    public void req2(int id, String method, String url, String body, String referer, String headers, String studyScope) {
         if (closed) return;
+        boolean study = isChaoxing(Uri.parse(url));
+        java.net.CookieManager studyCookies = study ? CxNet.cookieJar(studyScope) : null;
         pool.execute(() -> {
             JSONObject result;
             try {
-                result = request(method, new URL(url), body, referer, headers);
+                result = study && !CxNet.isCurrent(studyCookies) ? failure(401)
+                        : request(method, new URL(url), body, referer, headers, studyCookies);
             } catch (Exception e) {
-                result = new JSONObject();
-                try {
-                    result.put("status", 0);
-                } catch (org.json.JSONException ignored) { }
+                result = failure(0);
             }
-            String json = result.toString();
+            String response = result.toString();
             web.post(() -> {
-                if (!closed) web.evaluateJavascript(
-                        "window.__nativeDone(" + id + "," + JSONObject.quote(json) + ")", null);
+                if (closed) return;
+                String json = study && !CxNet.isCurrent(studyCookies) ? failure(401).toString() : response;
+                web.evaluateJavascript("window.__nativeDone(" + id + "," + JSONObject.quote(json) + ")", null);
             });
         });
+    }
+
+    private static JSONObject failure(int status) {
+        JSONObject result = new JSONObject();
+        try {
+            result.put("status", status);
+        } catch (org.json.JSONException ignored) { }
+        return result;
     }
 
     static boolean isChaoxing(Uri url) {
@@ -92,11 +101,11 @@ public final class NativeBridge {
     }
 
     private static JSONObject request(String method, URL url, String body, String referer,
-                                      String headers) throws Exception {
-        boolean study = isChaoxing(Uri.parse(url.toString()));
-        java.net.CookieManager studyCookies = study ? CxNet.cookieJar() : null;
+                                      String headers, java.net.CookieManager studyCookies) throws Exception {
+        boolean study = studyCookies != null;
         String customHeaders = headers;
         for (int redirects = 0; redirects <= 5; redirects++) {
+            if (study && !CxNet.isCurrent(studyCookies)) return failure(401);
             if (!allowed(method, url)) throw new SecurityException("Unsupported request");
             HttpURLConnection connection = (HttpURLConnection) url.openConnection();
             try {
@@ -188,7 +197,9 @@ public final class NativeBridge {
     }
 
     @JavascriptInterface public boolean cxHasLogin() { return CxNet.hasLogin(); }
-    @JavascriptInterface public String cxPersist() { return CxNet.persist(); }
+    @JavascriptInterface public String cxSessionKey() { return CxNet.sessionKey(); }
+    @JavascriptInterface public String cxPersist(String expected) { return CxNet.persist(expected); }
+    @JavascriptInterface public void cxInvalidate(String expected) { CxNet.invalidate(expected); }
     @JavascriptInterface public String loadWater() { return CredStore.loadWater(); }
     @JavascriptInterface public String saveWater(String value) { return CredStore.saveWater(value); }
     @JavascriptInterface public String waterState() { return CredStore.waterState(); }

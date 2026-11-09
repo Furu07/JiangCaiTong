@@ -2,11 +2,15 @@ package com.jxufe.jct;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.content.ActivityNotFoundException;
+import android.content.Intent;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
 import android.view.View;
+import android.webkit.ValueCallback;
+import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
@@ -17,9 +21,11 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 
 public class MainActivity extends Activity {
+    private static final int CHOOSE_TIMETABLE = 31;
     private static final String ORIGIN = "https://app.local";
     private WebView web;
     private NativeBridge bridge;
+    private ValueCallback<Uri[]> fileSelection;
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -35,13 +41,43 @@ public class MainActivity extends Activity {
         settings.setAllowContentAccess(false);
         settings.setSaveFormData(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-        settings.setUserAgentString(settings.getUserAgentString() + " JiangCaiTong/0.2.0");
+        settings.setUserAgentString(settings.getUserAgentString() + " JiangCaiTong/0.3.0");
         bridge = new NativeBridge(web);
         web.addJavascriptInterface(bridge, "Android");
         web.setWebViewClient(new AssetClient());
+        web.setWebChromeClient(new LocalFileChooser());
         applySystemBars();
         Store.trimWebViewCache(this, web);
         web.loadUrl(ORIGIN + "/index.html");
+    }
+
+    private final class LocalFileChooser extends WebChromeClient {
+        @Override
+        public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
+            if (!isLocal(Uri.parse(view.getUrl() == null ? "" : view.getUrl()))
+                    || params.getMode() != FileChooserParams.MODE_OPEN || fileSelection != null) return false;
+            Intent picker = new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE);
+            picker.setType("*/*");
+            picker.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"application/json", "text/html", "text/plain"});
+            try {
+                startActivityForResult(picker, CHOOSE_TIMETABLE);
+                fileSelection = callback;
+            } catch (ActivityNotFoundException error) {
+                callback.onReceiveValue(null);
+            }
+            return true;
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int request, int result, Intent data) {
+        super.onActivityResult(request, result, data);
+        if (request != CHOOSE_TIMETABLE || fileSelection == null) return;
+        Uri selected = result == RESULT_OK && data != null ? data.getData() : null;
+        ValueCallback<Uri[]> callback = fileSelection;
+        fileSelection = null;
+        callback.onReceiveValue(selected != null && "content".equals(selected.getScheme())
+                ? new Uri[]{selected} : null);
     }
 
     private final class AssetClient extends WebViewClient {
@@ -107,6 +143,10 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        if (fileSelection != null) {
+            fileSelection.onReceiveValue(null);
+            fileSelection = null;
+        }
         if (bridge != null) bridge.close();
         if (web != null) {
             web.removeJavascriptInterface("Android");

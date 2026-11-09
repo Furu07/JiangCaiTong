@@ -79,6 +79,7 @@
           readCount++;
           if (mode === 'network') throw Error('offline');
           if (mode === 'expired') throw { status: 401 };
+          if (typeof mode === 'number') throw { status: mode };
           if (mode === 'pending') return new Promise(resolve => { finishPending = resolve; });
           if (termId === second) return { format: 'json', content: JSON.stringify(spring) };
           return html;
@@ -103,6 +104,15 @@
     check(fallback.status === 'fallback' && fallback.error.code === 'request'
       && same(fallback.schedule, schedule) && fallback.syncedAt === repo.read(first).syncedAt,
       '网络失败回退同账号同学期缓存并保留原同步时间');
+    const classifications = [[403, 'permission'], [429, 'limited'], [503, 'service']];
+    const errors = [];
+    for (const [status, expected] of classifications) {
+      mode = status;
+      const failed = await repo.sync(first);
+      errors.push(failed.status === 'fallback' && failed.error.code === expected);
+    }
+    check(errors.every(Boolean) && adapter.status().state === 'authorized',
+      '权限、限流及服务异常分别归类并保留当前授权');
     mode = 'expired';
     const expired = await repo.sync(first);
     check(expired.status === 'fallback' && expired.error.code === 'expired'
@@ -127,6 +137,31 @@
     const unconfigured = JufeAcademicAdapter.create({});
     check(await expectFailure(() => unconfigured.loadSchedule(first), 'unconfigured'),
       '未配置正式传输时不访问猜测接口');
+
+    const imported = AcademicImport.createStore(storage);
+    imported.save(AcademicImport.parse(json.content));
+    check(imported.list().length === 1 && imported.read(first).schedule.courses.length === 4,
+      '导入 JSON 并仅保存规范化课表');
+    check(same(AcademicImport.parse(html.content), schedule), '导入 HTML 得到相同结构');
+    const unsafe = JSON.parse(json.content);
+    unsafe.courses[0].meetings[0].token = 'synthetic-secret';
+    check(await expectFailure(() => AcademicImport.parse(JSON.stringify(unsafe)), 'format')
+      && Array.from(values.values()).every(value => !value.includes('synthetic-secret')), '拒绝未定义的凭据字段');
+    check(await expectFailure(() => AcademicImport.parse('<script>throw Error(1)</script>' + html.content),
+      'format'), '拒绝样本中的脚本或其他非表格标签');
+    check(await expectFailure(() => AcademicImport.parse('x'.repeat(262145)), undefined),
+      '拒绝超出本地限制的文件内容');
+    const restoredImport = AcademicImport.createStore(storage);
+    check(same(restoredImport.read(first).schedule, schedule) && demoRepo.read(first) === null,
+      '重开可恢复导入数据，且不会写入示例缓存');
+    restoredImport.save(AcademicImport.parse(JSON.stringify(spring)));
+    const replacement = JSON.parse(json.content);
+    replacement.courses[0].name = '更新后的样本课程';
+    restoredImport.save(AcademicImport.parse(JSON.stringify(replacement)));
+    check(restoredImport.list().length === 2 && restoredImport.read(first).schedule.courses[0].name === '更新后的样本课程'
+      && restoredImport.read(second).schedule.courses.length === 0, '同一导入学期更新且保留其他学期');
+    restoredImport.remove(first);
+    check(restoredImport.read(first) === null && !!restoredImport.read(second), '只移除所选导入学期');
 
     result.textContent = tests.join('\n') + '\n' + tests.length + ' checks passed';
     result.dataset.status = 'pass';

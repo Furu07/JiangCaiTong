@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.2.0';
+const APP_VERSION = '0.3.0';
 const $ = id => document.getElementById(id);
 const tabs = Array.from(document.querySelectorAll('[data-tab]'));
 const native = window.Android;
@@ -60,6 +60,9 @@ function closeDetails() {
 window.closeDetails = closeDetails;
 
 const scheduleRepo = Academic.createRepository(Academic.mockAdapter, window.localStorage);
+const importedSchedules = AcademicImport.createStore(window.localStorage);
+const importedPrefix = 'import/';
+let demoTerms = [];
 let snapshot = null;
 let week = 1;
 let day = (new Date().getDay() + 6) % 7 + 1;
@@ -86,7 +89,7 @@ function courseButton(course) {
     course.conflict ? '该时段与其他课程重叠' : '',
     course.note,
     '教学周 · ' + course.weekText,
-    '数据来源 · ' + Academic.mockAdapter.label
+    '数据来源 · ' + snapshot.source
   ].filter(Boolean)));
   return button;
 }
@@ -118,9 +121,9 @@ function renderSchedule() {
   target.appendChild(grid);
 }
 
-function installSchedule(entry, label) {
-  const termChanged = !snapshot || snapshot.schedule.termId !== entry.schedule.termId;
-  snapshot = entry;
+function installSchedule(entry, label, source = Academic.mockAdapter.label) {
+  const termChanged = !snapshot || snapshot.source !== source || snapshot.schedule.termId !== entry.schedule.termId;
+  snapshot = { ...entry, source };
   const schedule = snapshot.schedule;
   if (termChanged) {
     week = Math.max(1, Math.min(schedule.totalWeeks, Academic.currentWeek(schedule, new Date())));
@@ -130,13 +133,17 @@ function installSchedule(entry, label) {
   for (let number = 1; number <= schedule.totalWeeks; number++) {
     $('week').add(new Option('第 ' + number + ' 周', number));
   }
-  $('scheduleStatus').textContent = Academic.mockAdapter.label + ' · ' + label + ' · ' + time(entry.syncedAt);
+  $('scheduleStatus').textContent = source + ' · ' + label + ' · ' + time(entry.syncedAt);
   renderSchedule();
 }
 
 async function syncSchedule() {
   const termId = $('term').value;
   if (!termId) return;
+  if (termId.startsWith(importedPrefix)) {
+    loadSelectedTerm();
+    return;
+  }
   $('term').disabled = true;
   $('scheduleSync').disabled = true;
   $('scheduleStatus').textContent = '正在读取本机示例…';
@@ -153,16 +160,22 @@ async function syncSchedule() {
   }
 }
 
-const studyKey = 'jct.study.v1';
-function readStudyCache() {
+const studyKey = 'jct.study.v2';
+const activeStudyScope = () => native ? native.cxSessionKey() : '';
+const emptyStudyCache = scope => ({ scope, courses: [], details: {}, at: 0 });
+
+function readStudyCache(scope) {
   try {
+    // The old cache had no account marker, so it cannot be attributed safely.
+    localStorage.removeItem('jct.study.v1');
     const entry = JSON.parse(localStorage.getItem(studyKey));
-    if (entry && Array.isArray(entry.courses) && entry.details) return entry;
+    if (scope && entry && entry.scope === scope && Array.isArray(entry.courses) && entry.details) return entry;
+    if (entry) localStorage.removeItem(studyKey);
   } catch (error) { /* Invalid or inaccessible cache. */ }
-  return { courses: [], details: {}, at: 0 };
+  return emptyStudyCache(scope);
 }
 
-let studyCache = readStudyCache();
+let studyCache = readStudyCache(activeStudyScope());
 let selectedCourse = '';
 let studyBusy = false;
 let studyMessage = '';
@@ -171,7 +184,17 @@ function courseKey(course) {
   return String(course.courseId) + ':' + String(course.classId);
 }
 
+function reconcileStudyCache() {
+  const scope = activeStudyScope();
+  if (studyCache.scope !== scope) {
+    studyCache = readStudyCache(scope);
+    selectedCourse = '';
+  }
+  return scope;
+}
+
 function saveStudyCache() {
+  if (!studyCache.scope || activeStudyScope() !== studyCache.scope) return;
   try {
     localStorage.setItem(studyKey, JSON.stringify(studyCache));
   } catch (error) {
@@ -180,9 +203,11 @@ function saveStudyCache() {
 }
 
 function clearStudyCache() {
-  localStorage.removeItem(studyKey);
-  studyCache = { courses: [], details: {}, at: 0 };
+  studyCache = emptyStudyCache(activeStudyScope());
   selectedCourse = '';
+  try {
+    localStorage.removeItem(studyKey);
+  } catch (error) { /* This session cannot be displayed without its matching scope. */ }
 }
 
 function showCourseResults(course) {
@@ -215,7 +240,7 @@ function resultRow(title, subtitle) {
 }
 
 function renderStudy() {
-  const linked = native && native.cxHasLogin();
+  const linked = !!reconcileStudyCache();
   $('studyLogin').disabled = !native || studyBusy;
   $('studyRefresh').disabled = !linked || studyBusy;
   $('studyStatus').textContent = studyMessage || (linked
@@ -246,7 +271,6 @@ function renderStudy() {
 function openStudyLogin() {
   if (!native || studyBusy) return;
   try {
-    clearStudyCache();
     if (!native.openStudyLogin()) {
       studyMessage = '登录窗口暂不可用，请稍后再试';
     } else {
@@ -260,34 +284,46 @@ function openStudyLogin() {
 
 async function queryStudy(course) {
   if (!native || studyBusy) return;
+  const scope = reconcileStudyCache();
+  if (!scope) return;
   if (course) selectedCourse = courseKey(course);
-  if (!native.cxHasLogin()) {
-    renderStudy();
-    if (course) $('studyDetails').scrollIntoView({ block: 'nearest' });
-    return;
-  }
   studyBusy = true;
   studyMessage = course ? '正在读取作业、考试与活动…' : '正在读取课程…';
   refreshSession();
   try {
     if (course) {
-      const sections = await Learning.readCourse(course);
+      const sections = await Learning.readCourse(course, scope);
+      if (activeStudyScope() !== scope) return;
       studyCache.details[courseKey(course)] = { at: Date.now(), sections };
       studyMessage = sections.some(section => section.error) ? '部分学习任务未读到，见课程详情。' : '学习任务读取完成。';
     } else {
-      const courses = await Learning.courses();
+      const courses = await Learning.courses(scope);
+      if (activeStudyScope() !== scope) return;
       const details = {};
       courses.forEach(item => {
         const key = courseKey(item);
         if (studyCache.details[key]) details[key] = studyCache.details[key];
       });
-      studyCache = { courses, details, at: Date.now() };
-      if (!native.cxPersist()) studyMessage = '课程查询完成。';
-      else studyMessage = '课程查询完成，暂时无法保存登录状态。';
+      studyCache = { scope, courses, details, at: Date.now() };
+      studyMessage = '课程查询完成。';
     }
+    if (native.cxPersist(scope)) studyMessage += ' 暂时无法保存登录状态。';
     saveStudyCache();
   } catch (error) {
-    studyMessage = error.message + (studyCache.at ? '。下方保留上次结果。' : '');
+    if (error.kind === 'auth') {
+      let cleared = true;
+      try {
+        native.cxInvalidate(scope);
+      } catch (failure) {
+        cleared = false;
+      }
+      if (studyCache.scope === scope) {
+        studyMessage = cleared ? '学习通会话已过期，请重新授权。' : '学习通会话已过期，本地登录状态清理失败。';
+        clearStudyCache();
+      }
+    } else if (activeStudyScope() === scope) {
+      studyMessage = error.message + (studyCache.at ? '。下方保留上次结果。' : '');
+    }
   } finally {
     studyBusy = false;
     refreshSession();
@@ -574,8 +610,29 @@ $('dayView').addEventListener('click', () => { daily = true; renderSchedule(); }
 $('appVersion').textContent = '版本 ' + APP_VERSION + ' · Debug';
 
 refreshSession();
+function renderTermOptions(selected) {
+  const term = $('term');
+  empty(term);
+  demoTerms.forEach(item => term.add(new Option(item.term, item.termId)));
+  importedSchedules.list().forEach(item => {
+    term.add(new Option('本地 · ' + item.term, importedPrefix + item.termId));
+  });
+  if (selected) term.value = selected;
+  if (!term.value) term.selectedIndex = 0;
+  loadSelectedTerm();
+}
+
 function loadSelectedTerm() {
-  const cached = scheduleRepo.read($('term').value);
+  const termId = $('term').value;
+  const imported = termId.startsWith(importedPrefix);
+  $('academicRemove').hidden = !imported;
+  $('scheduleSync').textContent = imported ? '读取本地课表' : '同步示例';
+  if (imported) {
+    const entry = importedSchedules.read(termId.slice(importedPrefix.length));
+    if (entry) installSchedule(entry, '导入时间', '本地导入');
+    return;
+  }
+  const cached = scheduleRepo.read(termId);
   if (cached) installSchedule(cached, '已读取离线缓存');
   else {
     snapshot = null;
@@ -587,7 +644,47 @@ function loadSelectedTerm() {
   }
 }
 
+let importing = false;
+$('academicImport').addEventListener('click', async () => {
+  if (importing) return;
+  const file = $('academicFile').files[0];
+  const pasted = $('academicPaste').value;
+  const status = $('academicImportStatus');
+  if (file && pasted.trim()) {
+    status.textContent = '请只使用一种导入方式，清空文件或粘贴内容后重试。';
+    return;
+  }
+  importing = true;
+  $('academicImport').disabled = true;
+  try {
+    const schedule = AcademicImport.parse(file ? await AcademicImport.readFile(file) : pasted);
+    importedSchedules.save(schedule);
+    $('academicFile').value = '';
+    $('academicPaste').value = '';
+    renderTermOptions(importedPrefix + schedule.termId);
+    status.textContent = '已保存到本机 · ' + schedule.courses.length + ' 个上课时段';
+  } catch (error) {
+    status.textContent = error.message;
+  } finally {
+    importing = false;
+    $('academicImport').disabled = false;
+  }
+});
+
+$('academicRemove').addEventListener('click', () => {
+  const selected = $('term').value;
+  if (!selected.startsWith(importedPrefix) || !window.confirm('移除当前导入学期的本地课表？')) return;
+  const status = $('academicImportStatus');
+  try {
+    importedSchedules.remove(selected.slice(importedPrefix.length));
+    renderTermOptions();
+    status.textContent = '已移除本地导入课表';
+  } catch (error) {
+    status.textContent = error.message;
+  }
+});
+
 Academic.mockAdapter.listTerms().then(terms => {
-  terms.forEach(term => $('term').add(new Option(term.term, term.termId)));
-  loadSelectedTerm();
+  demoTerms = terms;
+  renderTermOptions();
 });

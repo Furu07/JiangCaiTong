@@ -339,8 +339,8 @@
     return out;
   }
 
-  async function cxCourses() {
-    var r = await cxHttp('GET', CXS.COURSE_API, '', CXS.COURSE_REF);
+  async function cxCourses(scope) {
+    var r = await cxHttp('GET', CXS.COURSE_API, '', CXS.COURSE_REF, null, scope);
     cxStatusOk(r, '课程列表');
     var t = String((r && r.body) || '');
     if (!t.replace(/\s+/g, '')) throw cxErr('课程列表是空的 —— 登录态可能失效了', 'auth');
@@ -368,10 +368,10 @@
     return s.indexOf('passport2.chaoxing.com') >= 0 || s.indexOf('用户登录') >= 0;
   }
 
-  async function cxCourseMeta(c) {
+  async function cxCourseMeta(c, scope) {
     var url = CXS.COURSE_PAGE + '?courseid=' + c.courseId + '&clazzid=' + c.classId
             + '&cpi=' + c.cpi + '&ismooc2=1&v=2';
-    var r = await cxHttp('GET', url, '', '');
+    var r = await cxHttp('GET', url, '', '', null, scope);
     cxStatusOk(r, '课程页');
     // 原生层已经把重定向跟完并把**最终地址**带回来了，stuenc 就在里面
     var u = String((r && r.url) || '') || url;
@@ -384,7 +384,7 @@
     };
   }
 
-  async function cxWorkList(c, meta) {
+  async function cxWorkList(c, meta, scope) {
     // 🔴 kind 用 'noentry' 而不是 'deny'：界面上这是**完全不同**的两句话。
     //    deny = 被拒绝（账号可能有问题），noentry = 这门课的页面里压根没这个
     //    入口（多半已结课归档）。混成一种，用户只能看到「拿不到入口」。
@@ -392,7 +392,7 @@
     var url = CXS.WORK_LIST + '?courseId=' + c.courseId + '&classId=' + c.classId
             + '&cpi=' + c.cpi + '&ut=s&t=' + Date.now()
             + '&stuenc=' + meta.stuenc + '&enc=' + meta.workEnc;
-    var r = await cxHttp('GET', url, '', meta.referer);
+    var r = await cxHttp('GET', url, '', meta.referer, null, scope);
     cxStatusOk(r, '作业列表');
     var t = String((r && r.body) || '');
     if (t.indexOf('无权限的操作') >= 0 || t.indexOf('无效的用户') >= 0) {
@@ -401,14 +401,14 @@
     return cxParseWork(t);
   }
 
-  async function cxActiveList(c) {
+  async function cxActiveList(c, scope) {
     if (!c.schoolId) throw cxErr('这门课没带学校 id，活动查不了', 'parse');
     var url = CXS.ACTIVE_LIST + '?fid=' + c.schoolId
             + '&courseId=' + c.courseId + '&classId=' + c.classId
             + '&showNotStartedActive=0&_=' + Date.now();
     var referer = CXS.COURSE_PAGE + '?courseid=' + c.courseId
                 + '&clazzid=' + c.classId + '&cpi=' + c.cpi;
-    var r = await cxHttp('GET', url, '', referer, { 'X-Requested-With': 'XMLHttpRequest' });
+    var r = await cxHttp('GET', url, '', referer, { 'X-Requested-With': 'XMLHttpRequest' }, scope);
     cxStatusOk(r, '活动列表');
     var t = String((r && r.body) || '');
     // 没登录时会 302 到登录页，回来的是一大坨 HTML 而不是 JSON
@@ -431,11 +431,11 @@
     return cxParseActive(j);
   }
 
-  async function cxExamList(c, meta) {
+  async function cxExamList(c, meta, scope) {
     if (!meta.stuenc) throw cxErr('没给考试入口', 'noentry');
     var url = CXS.EXAM_LIST + '?courseid=' + c.courseId + '&clazzid=' + c.classId
             + '&cpi=' + c.cpi + '&ut=s&t=' + Date.now() + '&stuenc=' + meta.stuenc;
-    var r = await cxHttp('GET', url, '', meta.referer);
+    var r = await cxHttp('GET', url, '', meta.referer, null, scope);
     cxStatusOk(r, '考试列表');
     var t = String((r && r.body) || '');
     if (t.indexOf('这次操作没成功，重试一次') >= 0) {
@@ -453,11 +453,11 @@
   let lastRequest = 0;
   let limitedUntil = 0;
 
-  async function cxHttp(method, url, body, referer, headers) {
+  async function cxHttp(method, url, body, referer, headers, scope) {
     if (Date.now() < limitedUntil) throw cxErr('学习通限制了查询频率，请稍后再试', 'busy');
     await cxSleep(Math.max(0, 450 - (Date.now() - lastRequest)));
     lastRequest = Date.now();
-    return nativeRequest(method, url, body, referer, headers);
+    return nativeRequest(method, url, body, referer, headers, scope);
   }
 
   function cxStatusOk(response, section) {
@@ -475,19 +475,19 @@
     }
   }
 
-  async function readCourse(course) {
+  async function readCourse(course, scope) {
     let meta;
     let metaError;
     try {
-      meta = await cxCourseMeta(course);
+      meta = await cxCourseMeta(course, scope);
     } catch (error) {
       if (error.kind === 'auth' || error.kind === 'busy') throw error;
       metaError = error;
     }
     const sections = [
-      ['作业', () => cxWorkList(course, meta)],
-      ['考试', () => cxExamList(course, meta)],
-      ['活动', () => cxActiveList(course)],
+      ['作业', () => cxWorkList(course, meta, scope)],
+      ['考试', () => cxExamList(course, meta, scope)],
+      ['活动', () => cxActiveList(course, scope)],
     ];
     const result = [];
     for (const [title, read] of sections) {
@@ -499,7 +499,6 @@
         result.push({ title, error: error.message });
       }
     }
-    if (Android.cxHasLogin()) Android.cxPersist();
     return result;
   }
 

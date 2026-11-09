@@ -266,3 +266,12 @@ input { display: block; width: 100%; }
   .scroll { padding-right: 8px; padding-left: 8px; }
   .week-schedule { padding-right: 2px; padding-left: 2px; }
 }
+
+#academicImportPanel { margin-top: 12px; }
+#academicImportPanel input, #academicImportPanel textarea {
+  display: block; width: 100%; max-width: 100%; margin: 4px 0 8px;
+}
+#academicImportPanel textarea {
+  padding: 8px; border-radius: 8px; color: var(--text); background: var(--card);
+  border: 1px solid var(--line-strong); font: inherit;
+}

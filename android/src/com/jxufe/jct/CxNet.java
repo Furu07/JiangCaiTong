@@ -9,8 +9,10 @@ import java.net.CookieStore;
 import java.net.HttpCookie;
 import java.net.URI;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 
 final class CxNet {
     private static final String API_HOST = "mooc1-api.chaoxing.com";
@@ -18,7 +20,24 @@ final class CxNet {
         "passport2.chaoxing.com", "chaoxing.com", "i.chaoxing.com", "mooc1.chaoxing.com",
         API_HOST, "mooc2-ans.chaoxing.com", "mobilelearn.chaoxing.com"
     };
-    private static volatile CookieManager jar = newJar();
+    private static volatile Session session = new Session(newJar(), "");
+
+    private static final class Session {
+        final CookieManager jar;
+        final String key;
+        final Map<String, String> identity;
+
+        Session(CookieManager jar, String key) {
+            this.jar = jar;
+            this.key = key;
+            this.identity = identities(jar);
+        }
+
+        boolean matchesIdentity() {
+            return !key.isEmpty() && !identity.isEmpty()
+                    && identities(jar).entrySet().containsAll(identity.entrySet());
+        }
+    }
 
     private CxNet() {}
 
@@ -37,14 +56,25 @@ final class CxNet {
         return domain != null && domain.startsWith(".") ? domain.substring(1) : domain;
     }
 
-    static CookieManager cookieJar() {
-        return jar;
+    static CookieManager cookieJar(String expected) {
+        Session current = session;
+        return !expected.isEmpty() && current.key.equals(expected) && current.matchesIdentity() ? current.jar : null;
+    }
+
+    static boolean isCurrent(CookieManager jar) {
+        Session current = session;
+        return current.jar == jar && current.matchesIdentity();
+    }
+
+    static String sessionKey() {
+        Session current = session;
+        return current.matchesIdentity() ? current.key : "";
     }
 
     static synchronized void clearSession() {
         CredStore.clearCx();
         // A running HTTP request can update its old jar without restoring the cleared session.
-        jar = newJar();
+        session = new Session(newJar(), "");
     }
 
     static synchronized boolean importWebSession(android.webkit.CookieManager webCookies) {
@@ -71,14 +101,15 @@ final class CxNet {
                 }
             }
         }
-        if (!hasIdentity(candidate)) return false;
-        String failure = CredStore.saveCx(dumpCookies(candidate));
+        Session next = new Session(candidate, UUID.randomUUID().toString());
+        if (!next.matchesIdentity()) return false;
+        String failure = save(next);
         if (!failure.isEmpty()) throw new IllegalStateException(failure);
-        jar = candidate;
+        session = next;
         return true;
     }
 
-    private static boolean hasIdentity(CookieManager candidate) {
+    private static Map<String, String> identities(CookieManager candidate) {
         Map<String, String> identities = new HashMap<>();
         boolean hasApiIdentity = false;
         for (HttpCookie cookie : candidate.getCookieStore().getCookies()) {
@@ -89,20 +120,35 @@ final class CxNet {
                 hasApiIdentity = true;
             }
             String previous = identities.putIfAbsent(name, value);
-            if (previous != null && !previous.equals(value)) return false;
+            if (previous != null && !previous.equals(value)) return Collections.emptyMap();
         }
-        return hasApiIdentity;
+        return hasApiIdentity ? identities : Collections.emptyMap();
     }
 
     static boolean hasLogin() {
-        return hasIdentity(jar);
+        return !sessionKey().isEmpty();
     }
 
-    static synchronized String persist() {
-        return hasIdentity(jar) ? CredStore.saveCx(dumpCookies(jar)) : "学习通会话不可用";
+    static synchronized String persist(String expected) {
+        return cookieJar(expected) != null ? save(session) : "学习通会话已变更";
     }
 
-    private static String dumpCookies(CookieManager source) {
+    static synchronized void invalidate(String expected) {
+        if (!expected.isEmpty() && session.key.equals(expected)) clearSession();
+    }
+
+    private static String save(Session value) {
+        JSONObject data = new JSONObject();
+        try {
+            data.put("key", value.key);
+            data.put("cookies", dumpCookies(value.jar));
+        } catch (org.json.JSONException error) {
+            return "无法保存学习通会话";
+        }
+        return CredStore.saveCx(data.toString());
+    }
+
+    private static JSONArray dumpCookies(CookieManager source) {
         JSONArray entries = new JSONArray();
         for (HttpCookie cookie : source.getCookieStore().getCookies()) {
             if (!isHost(cookieHost(cookie)) || cookie.hasExpired()) continue;
@@ -116,7 +162,7 @@ final class CxNet {
                 entries.put(entry);
             } catch (org.json.JSONException ignored) { }
         }
-        return entries.toString();
+        return entries;
     }
 
     static void restore() {
@@ -124,8 +170,17 @@ final class CxNet {
         if (stored.isEmpty()) return;
         CookieManager candidate = newJar();
         CookieStore cookies = candidate.getCookieStore();
+        String key;
         try {
-            JSONArray entries = new JSONArray(stored);
+            JSONArray entries;
+            if (stored.startsWith("[")) {
+                entries = new JSONArray(stored);
+                key = UUID.randomUUID().toString();
+            } else {
+                JSONObject saved = new JSONObject(stored);
+                key = UUID.fromString(saved.getString("key")).toString();
+                entries = saved.getJSONArray("cookies");
+            }
             for (int i = 0; i < entries.length(); i++) {
                 JSONObject entry = entries.optJSONObject(i);
                 if (entry == null) continue;
@@ -140,9 +195,13 @@ final class CxNet {
                     cookies.add(URI.create("https://" + host + "/"), cookie);
                 } catch (IllegalArgumentException ignored) { }
             }
-        } catch (org.json.JSONException ignored) {
+        } catch (org.json.JSONException | IllegalArgumentException ignored) {
             return;
         }
-        if (hasIdentity(candidate)) jar = candidate;
+        Session restored = new Session(candidate, key);
+        if (restored.matchesIdentity()) {
+            session = restored;
+            if (stored.startsWith("[")) save(restored);
+        }
     }
 }
