@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.3.0';
+const APP_VERSION = '0.4.0';
 const $ = id => document.getElementById(id);
 const tabs = Array.from(document.querySelectorAll('[data-tab]'));
 const native = window.Android;
@@ -106,6 +106,10 @@ function renderSchedule() {
   $('dayView').setAttribute('aria-pressed', String(daily));
   const target = $('schedule');
   empty(target);
+  if (!schedule.courses.length) {
+    target.appendChild(node('p', '此学期的课表数据为空。', 'card pad sub'));
+    return;
+  }
   const grid = node('div', null, daily ? 'day-schedule card pad' : 'week-schedule card');
   const visibleDays = daily ? [day] : [1, 2, 3, 4, 5, 6, 7];
   visibleDays.forEach(weekday => {
@@ -177,6 +181,7 @@ function readStudyCache(scope) {
 
 let studyCache = readStudyCache(activeStudyScope());
 let selectedCourse = '';
+let studyAttempt = null;
 let studyBusy = false;
 let studyMessage = '';
 
@@ -189,6 +194,8 @@ function reconcileStudyCache() {
   if (studyCache.scope !== scope) {
     studyCache = readStudyCache(scope);
     selectedCourse = '';
+    studyAttempt = null;
+    studyMessage = scope ? '已接收学习通会话，请查询课程确认授权。' : '';
   }
   return scope;
 }
@@ -205,6 +212,7 @@ function saveStudyCache() {
 function clearStudyCache() {
   studyCache = emptyStudyCache(activeStudyScope());
   selectedCourse = '';
+  studyAttempt = null;
   try {
     localStorage.removeItem(studyKey);
   } catch (error) { /* This session cannot be displayed without its matching scope. */ }
@@ -213,18 +221,33 @@ function clearStudyCache() {
 function showCourseResults(course) {
   const target = $('studyDetails');
   empty(target);
-  const entry = studyCache.details[courseKey(course)];
-  if (!entry) return;
+  const key = courseKey(course);
+  const entry = studyCache.details[key];
+  const sections = studyAttempt && studyAttempt.key === key ? studyAttempt.sections : entry && entry.sections;
   const card = node('section', null, 'card pad');
   card.appendChild(node('h2', course.title || '课程详情'));
-  card.appendChild(node('p', '读取时间 · ' + time(entry.at), 'sub'));
-  entry.sections.forEach(section => {
+  const refresh = node('button', '刷新学习任务', 'btn');
+  refresh.disabled = studyBusy;
+  refresh.addEventListener('click', () => queryStudy(course));
+  card.appendChild(refresh);
+  if (!sections) card.appendChild(node('p', studyBusy ? '正在读取…' : '尚无任务缓存。', 'sub'));
+  (sections || []).forEach(section => {
     const group = node('details', null, 'result-group');
-    group.appendChild(node('summary', section.title + (section.error ? ' · 查询失败' : ' · ' + section.items.length + ' 项')));
-    if (section.error) group.appendChild(node('p', section.error, 'sub'));
-    else if (!section.items.length) group.appendChild(node('p', '未读到条目', 'sub'));
-    else section.items.forEach(item => {
-      const status = [item.kindName, item.status, item.left].filter(Boolean).join(' · ');
+    const state = section.error ? (section.cached ? ' · 旧缓存' : ' · 查询失败')
+      : ' · ' + section.items.length + ' 项';
+    group.appendChild(node('summary', section.title + state));
+    if (section.error) {
+      group.open = true;
+      group.appendChild(node('p', section.error, 'sub'));
+    }
+    if (section.items && (section.at || entry)) {
+      group.appendChild(node('p', '数据时间 · ' + time(section.at || entry.at), 'sub'));
+    }
+    if (section.items && !section.items.length) group.appendChild(node('p', '暂无' + section.title, 'sub'));
+    (section.items || []).forEach(item => {
+      const signed = item.kind === 'sign' && !item.status
+        ? item.signed === true ? '已签' : item.signed === false ? '未签' : '签到状态未知' : '';
+      const status = [item.kindName, item.status || signed, item.left].filter(Boolean).join(' · ');
       group.appendChild(resultRow(item.title, status));
     });
     card.appendChild(group);
@@ -244,7 +267,7 @@ function renderStudy() {
   $('studyLogin').disabled = !native || studyBusy;
   $('studyRefresh').disabled = !linked || studyBusy;
   $('studyStatus').textContent = studyMessage || (linked
-    ? '已载入本机登录状态，请查询课程以验证。' : '在超星官方页面完成登录后，点「完成登录并返回」。');
+    ? '已载入本机会话，请查询课程确认授权。' : '在超星官方页面完成登录后，点「完成登录并返回」。');
   const target = $('studyCourses');
   empty(target);
   if (studyCache.at) {
@@ -258,7 +281,14 @@ function renderStudy() {
         (course.alias && course.alias !== course.title ? ' · ' + course.alias : ''), 'course-list-item');
       button.disabled = studyBusy || (!linked && !studyCache.details[key]);
       button.setAttribute('aria-pressed', String(selectedCourse === key));
-      button.addEventListener('click', () => queryStudy(course));
+      button.addEventListener('click', () => {
+        selectedCourse = key;
+        if (!studyCache.details[key]) queryStudy(course);
+        else {
+          renderStudy();
+          $('studyDetails').scrollIntoView({ block: 'nearest' });
+        }
+      });
       card.appendChild(button);
     });
     target.appendChild(card);
@@ -294,8 +324,13 @@ async function queryStudy(course) {
     if (course) {
       const sections = await Learning.readCourse(course, scope);
       if (activeStudyScope() !== scope) return;
-      studyCache.details[courseKey(course)] = { at: Date.now(), sections };
-      studyMessage = sections.some(section => section.error) ? '部分学习任务未读到，见课程详情。' : '学习任务读取完成。';
+      const key = courseKey(course);
+      const previous = studyCache.details[key];
+      const merged = Learning.mergeCourseResults(previous, sections, Date.now());
+      studyAttempt = { key, sections: merged.sections };
+      if (merged.cache && merged.cache !== previous) studyCache.details[key] = merged.cache;
+      studyMessage = sections.every(section => section.error) ? '任务刷新失败，请查看各类别的状态。'
+        : sections.some(section => section.error) ? '部分学习任务未更新，请查看各类别的状态。' : '学习任务读取完成。';
     } else {
       const courses = await Learning.courses(scope);
       if (activeStudyScope() !== scope) return;
@@ -305,7 +340,8 @@ async function queryStudy(course) {
         if (studyCache.details[key]) details[key] = studyCache.details[key];
       });
       studyCache = { scope, courses, details, at: Date.now() };
-      studyMessage = '课程查询完成。';
+      studyAttempt = null;
+      studyMessage = courses.length ? '课程查询成功，会话已验证。' : '课程查询成功，该账号暂无课程。';
     }
     if (native.cxPersist(scope)) studyMessage += ' 暂时无法保存登录状态。';
     saveStudyCache();
@@ -644,6 +680,9 @@ function loadSelectedTerm() {
   }
 }
 
+$('academicFormat').addEventListener('change', event => {
+  $('academicImport').textContent = event.target.value === 'school' ? '检查原始样本' : '校验并导入';
+});
 let importing = false;
 $('academicImport').addEventListener('click', async () => {
   if (importing) return;
@@ -657,8 +696,27 @@ $('academicImport').addEventListener('click', async () => {
   importing = true;
   $('academicImport').disabled = true;
   try {
-    const schedule = AcademicImport.parse(file ? await AcademicImport.readFile(file) : pasted);
-    importedSchedules.save(schedule);
+    const content = file ? await AcademicImport.readFile(file) : pasted;
+    const result = $('academicFormat').value === 'school'
+      ? AcademicImport.inspectSchoolSample(content)
+      : { schedule: AcademicImport.parse(content) };
+    if (!result.schedule) {
+      $('academicFile').value = '';
+      $('academicPaste').value = '';
+      status.textContent = result.summary + '。当前尚无对应的学校解析器，本次只检查结构，原课表保留。';
+      return;
+    }
+    const schedule = result.schedule;
+    try {
+      importedSchedules.save(schedule);
+    } catch (error) {
+      if (error.code !== 'empty-replacement') throw error;
+      if (!window.confirm('样本声明此学期没有课程。用空课表替换已有课表？')) {
+        status.textContent = error.message;
+        return;
+      }
+      importedSchedules.save(schedule, { replaceWithEmpty: true });
+    }
     $('academicFile').value = '';
     $('academicPaste').value = '';
     renderTermOptions(importedPrefix + schedule.termId);

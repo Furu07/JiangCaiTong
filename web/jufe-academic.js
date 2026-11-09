@@ -228,5 +228,10 @@
   }
 
   const fixtureParsers = Object.freeze({ json: fromJson, html: fromHtml });
-  window.JufeAcademicAdapter = { create: createAdapter, parseSchedule, fixtureParsers };
+  // Register a codec here only after the corresponding school response has been verified.
+  const schoolParsers = Object.freeze({
+    'jufe-html': null,
+    'jufe-json': null
+  });
+  window.JufeAcademicAdapter = { create: createAdapter, parseSchedule, fixtureParsers, schoolParsers };
 })();

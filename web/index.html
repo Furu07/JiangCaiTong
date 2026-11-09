@@ -41,7 +41,12 @@
           <button class="btn" id="academicOfficial">打开学校官方教务</button>
           <details id="academicImportPanel">
             <summary>导入脱敏课表</summary>
-            <p class="sub">请选择 UTF-8 的 JCT 交换格式 JSON 或 HTML，或粘贴同格式文本。请先去除身份信息和凭据。同一导入学期会被新样本更新。</p>
+            <p class="sub">请先去除身份信息和凭据。JCT 格式可生成课表，学校原始样本可在本机检查结构。</p>
+            <label for="academicFormat">导入类型</label>
+            <select id="academicFormat">
+              <option value="exchange">JCT 交换格式</option>
+              <option value="school">学校原始 HTML / JSON 样本</option>
+            </select>
             <label for="academicFile">选择文件</label>
             <input type="file" id="academicFile" accept=".json,.html,.htm,.txt,application/json,text/html,text/plain">
             <label for="academicPaste">或粘贴文本</label>

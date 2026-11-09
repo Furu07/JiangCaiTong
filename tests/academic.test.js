@@ -160,6 +160,28 @@
     restoredImport.save(AcademicImport.parse(JSON.stringify(replacement)));
     check(restoredImport.list().length === 2 && restoredImport.read(first).schedule.courses[0].name === '更新后的样本课程'
       && restoredImport.read(second).schedule.courses.length === 0, '同一导入学期更新且保留其他学期');
+    const rawJson = '{"someSchoolShape":[{"slot":"redacted"}]}';
+    const rawHtml = '<table><tr><td>脱敏时段</td></tr></table>';
+    check(AcademicImport.inspectSchoolSample(rawJson).schedule === null
+      && AcademicImport.inspectSchoolSample(rawHtml).summary.includes('1 个表格'),
+      '学校原始 HTML/JSON 可读取结构，但未注册解析器时不生成课表');
+    const rawRoutes = {
+      'jufe-json': content => content === rawJson ? schedule : null,
+      'jufe-html': content => content === rawHtml ? schedule : null
+    };
+    check(same(AcademicImport.inspectSchoolSample(rawJson, rawRoutes).schedule, schedule)
+      && same(AcademicImport.inspectSchoolSample(rawHtml, rawRoutes).schedule, schedule),
+      '测试注入的学校 HTML/JSON 解析槽各自路由并规范化');
+    check(await expectFailure(() => AcademicImport.inspectSchoolSample(json.content), undefined)
+      && await expectFailure(() => AcademicImport.inspectSchoolSample('{"log":{"entries":[]}}'), undefined)
+      && await expectFailure(() => AcademicImport.inspectSchoolSample('<form><input type="password"></form>'), undefined),
+      '原始样本模式拒绝 JCT、抓包和登录表单');
+    const emptyReplacement = { ...schedule, courses: [], changes: [] };
+    check(await expectFailure(() => restoredImport.save(emptyReplacement), 'empty-replacement')
+      && restoredImport.read(first).schedule.courses[0].name === '更新后的样本课程',
+      '未确认的空课表不可覆盖原数据');
+    restoredImport.save(emptyReplacement, { replaceWithEmpty: true });
+    check(restoredImport.read(first).schedule.courses.length === 0, '显式确认后可保存空课表');
     restoredImport.remove(first);
     check(restoredImport.read(first) === null && !!restoredImport.read(second), '只移除所选导入学期');
 

@@ -202,7 +202,7 @@
   }
 
   function cxParseActive(j, nowSec) {
-    if (!j || typeof j !== 'object') return [];
+    if (!j || typeof j !== 'object') throw cxErr('无法识别活动列表', 'parse');
     var res = j.result;
     if (!(res === 1 || res === '1' || res === true)) {
       throw cxErr(String(j.errorMsg || j.msg || '活动列表返回失败'), 'deny');
@@ -252,11 +252,23 @@
         signed: kd === 'sign' ? cxSignState(a.nameTwo) : null,
       });
     }
+    if (rows.length && !out.length) throw cxErr('活动列表含无法识别的记录', 'parse');
     return out;
   }
 
+  function cxMarkup(html) {
+    const template = document.createElement('template');
+    template.innerHTML = String(html || '');
+    return template.content;
+  }
+
+  function cxTaskResult(doc, items, name) {
+    if (items.length || doc.textContent.includes('暂无' + name)) return items;
+    throw cxErr('无法确认' + name + '列表是否为空', 'parse');
+  }
+
   function cxParseExam(html, nowSec) {
-    var doc = new DOMParser().parseFromString(String(html || ''), 'text/html');
+    var doc = cxMarkup(html);
     var lis = doc.querySelectorAll('li');
     var out = [];
     for (var i = 0; i < lis.length; i++) {
@@ -302,14 +314,13 @@
         endAt: de.endAt,
       });
     }
-    return out;
+    return cxTaskResult(doc, out, '考试');
   }
 
   function cxParseWork(html, nowSec) {
-    var doc = new DOMParser().parseFromString(String(html || ''), 'text/html');
+    var doc = cxMarkup(html);
     var ul = doc.querySelector('ul');
-    if (!ul) return [];
-    var lis = ul.querySelectorAll('li');
+    var lis = ul ? ul.querySelectorAll('li[aria-label]') : [];
     var out = [];
     for (var i = 0; i < lis.length; i++) {
       var li = lis[i];
@@ -336,36 +347,34 @@
         endAt: dw.endAt,
       });
     }
-    return out;
+    return cxTaskResult(doc, out, '作业');
   }
 
   async function cxCourses(scope) {
     var r = await cxHttp('GET', CXS.COURSE_API, '', CXS.COURSE_REF, null, scope);
     cxStatusOk(r, '课程列表');
     var t = String((r && r.body) || '');
-    if (!t.replace(/\s+/g, '')) throw cxErr('课程列表是空的 —— 登录态可能失效了', 'auth');
-    // 🔴 登录页要单独认出来。不认的话会掉进下面 JSON.parse 失败那条，
-    //    报「课程列表不是 JSON，接口可能变了」—— 那是**假话**：
-    //    接口没变，只是没登录，服务器把我们 302 到登录页了。
-    //    用户按「接口变了」去理解，唯一能做的事是等更新，而真正该做的是重连。
-    if (cxLooksLoggedOut(t)) {
-      throw cxErr('学习通的登录态过期了，点「重新连接」再试一次', 'auth');
-    }
     var j;
     try { j = JSON.parse(t); }
     catch (e) { throw cxErr('课程列表没读出来，学校系统可能改版了', 'parse'); }
     if (!j || !Array.isArray(j.channelList)) {
       throw cxErr('课程列表没读出来，学校系统可能改版了', 'parse');
     }
-    return cxUniqueCourses(cxParseCourses(j));
+    const courses = cxUniqueCourses(cxParseCourses(j));
+    if (j.channelList.length && !courses.length) throw cxErr('课程列表含无法识别的记录', 'parse');
+    return courses;
   }
 
-  function cxLooksLoggedOut(text) {
-    var s = String(text == null ? '' : text);
-    if (!s) return false;
-    var head = s.replace(/^\s+/, '').charAt(0);
-    if (head === '{' || head === '[') return false;      // 是 JSON 就不可能是登录页
-    return s.indexOf('passport2.chaoxing.com') >= 0 || s.indexOf('用户登录') >= 0;
+  function cxLooksLoggedOut(body) {
+    const text = String(body || '').trim();
+    if (text[0] !== '<') return false;
+    const markup = cxMarkup(text);
+    if (markup.querySelector('form[action*="fanyalogin" i], form[action*="/login" i] input[type="password"]')) {
+      return true;
+    }
+    const title = markup.querySelector('title');
+    return !!(title && /^(学习通登录|超星登录|用户登录)$/.test(title.textContent.trim())
+      && markup.querySelector('input[type="password"]'));
   }
 
   async function cxCourseMeta(c, scope) {
@@ -414,15 +423,6 @@
     // 没登录时会 302 到登录页，回来的是一大坨 HTML 而不是 JSON
     var head = t.replace(/^\s+/, '').slice(0, 1);
     if (head !== '{' && head !== '[') {
-      // 🔴 非 JSON **不再一律判 auth**。原来只要不是 JSON 就说「登录态可能失效了」，
-      //    可 auth 会让扫描直接停下 —— 一个维护页 / 接口改版，就能让后面
-      //    所有课**一门都不查**，而用户看到的是「登录失效」。
-      //    现在只有真的看到登录页特征才判 auth，其余判 parse（照常往下查）。
-      var hs = t.slice(0, 4000);
-      if (hs.indexOf('用户登录') >= 0 || hs.indexOf('passport2') >= 0
-          || hs.toLowerCase().indexOf('login') >= 0) {
-        throw cxErr('活动列表跳到登录页了（登录态失效）', 'auth');
-      }
       throw cxErr('活动列表没读出来，学校系统可能改版了', 'parse');
     }
     var j;
@@ -444,9 +444,6 @@
     if (t.indexOf('无权限的操作') >= 0 || t.indexOf('无效的用户') >= 0) {
       throw cxErr('考试列表被拒（登录态失效）', 'deny');
     }
-    if (t.slice(0, 3000).indexOf('用户登录') >= 0) {
-      throw cxErr('考试页跳到登录了（登录态失效）', 'auth');
-    }
     return cxParseExam(t);
   }
 
@@ -463,13 +460,14 @@
   function cxStatusOk(response, section) {
     const status = response.status;
     const loginPage = response.url && new URL(response.url).hostname === 'passport2.chaoxing.com';
-    if (status === 401 || loginPage) {
+    if (status === 401 || loginPage || (status === 200 && cxLooksLoggedOut(response.body))) {
       throw cxErr('学习通登录已过期，请重新授权', 'auth');
     }
-    if (status === 202) {
+    if (status === 202 || status === 429) {
       limitedUntil = Date.now() + 15 * 60 * 1000;
       throw cxErr('学习通限制了查询频率，请在 15 分钟后再试', 'busy');
     }
+    if (status === 403) throw cxErr(section + '访问被拒绝', 'deny');
     if (status !== 200) {
       throw cxErr(status ? section + '返回 HTTP ' + status : section + '连接失败', 'net');
     }
@@ -481,7 +479,7 @@
     try {
       meta = await cxCourseMeta(course, scope);
     } catch (error) {
-      if (error.kind === 'auth' || error.kind === 'busy') throw error;
+      if (error.kind === 'auth') throw error;
       metaError = error;
     }
     const sections = [
@@ -495,12 +493,30 @@
         if (metaError && title !== '活动') throw metaError;
         result.push({ title, items: await read() });
       } catch (error) {
-        if (error.kind === 'auth' || error.kind === 'busy') throw error;
+        if (error.kind === 'auth') throw error;
         result.push({ title, error: error.message });
       }
     }
     return result;
   }
 
-  window.Learning = { courses: cxCourses, readCourse };
+  function mergeCourseResults(previous, attempts, at) {
+    const oldSections = previous ? previous.sections : [];
+    const sections = attempts.map(result => {
+      if (!result.error) return { title: result.title, items: result.items, at };
+      const saved = oldSections.find(section => section.title === result.title && !section.error && Array.isArray(section.items));
+      return { title: result.title, error: result.error, ...(saved ? {
+        items: saved.items, at: saved.at || previous.at, cached: true
+      } : {}) };
+    });
+    const successful = attempts.some(result => !result.error);
+    return {
+      sections,
+      cache: successful ? { at, sections: sections.filter(section => section.items).map(section => ({
+        title: section.title, items: section.items, at: section.at
+      })) } : previous
+    };
+  }
+
+  window.Learning = { courses: cxCourses, readCourse, mergeCourseResults };
 })();
