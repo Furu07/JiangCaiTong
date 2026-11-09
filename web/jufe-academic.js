@@ -3,6 +3,14 @@
   'use strict';
 
   const schema = 'jct-timetable/1';
+  // The portal label and the published calendar are independent evidence.
+  // https://jwc.jxufe.edu.cn/news-show-2056.html
+  // https://jwc.jxufe.edu.cn/news-show-2054.html
+  const portalTerms = new Map([
+    ['2026-2027学年第一学期', {
+      id: '261', label: '2026-2027学年第一学期', firstMonday: '2026-09-07', totalWeeks: 19
+    }]
+  ]);
 
   class AcademicError extends Error {
     constructor(code, message) {
@@ -138,8 +146,9 @@
   // metadata and one entry per course block in its corresponding weekday.
   function fromPortalGrid(content) {
     const data = JSON.parse(content);
-    fields(data, ['term', 'blocks']);
-    fields(data.term, termFields);
+    fields(data, ['termLabel', 'blocks']);
+    const term = portalTerms.get(data.termLabel);
+    if (!term) throw new AcademicError('format', '个人课表所选学期暂无已核实的官方校历');
     if (!Array.isArray(data.blocks) || !data.blocks.length) {
       throw new AcademicError('format', '未取得已确认的个人课表课程块');
     }
@@ -161,7 +170,7 @@
         location: campus ? campus[1].trim() : place, campus: campus ? campus[2].trim() : ''
       };
     });
-    return { ...readTerm(data.term), courses };
+    return { ...readTerm(term), courses };
   }
 
   function parseSchedule(response, parsers = fixtureParsers) {

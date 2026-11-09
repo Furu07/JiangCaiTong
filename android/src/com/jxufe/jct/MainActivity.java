@@ -50,7 +50,7 @@ public class MainActivity extends Activity {
         settings.setAllowContentAccess(false);
         settings.setSaveFormData(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-        settings.setUserAgentString(settings.getUserAgentString() + " JiangCaiTong/0.5.4");
+        settings.setUserAgentString(settings.getUserAgentString() + " JiangCaiTong/0.5.6");
         bridge = new NativeBridge(web);
         web.addJavascriptInterface(bridge, "Android");
         web.setWebViewClient(new AssetClient());
@@ -83,8 +83,10 @@ public class MainActivity extends Activity {
         super.onActivityResult(request, result, data);
         if (request == ACADEMIC_VISIT) {
             String structure = data == null ? "" : data.getStringExtra("structure");
+            String grid = data == null ? "" : data.getStringExtra("gridProjection");
             if (web != null) web.evaluateJavascript("window.academicPortalReturned && window.academicPortalReturned("
-                    + org.json.JSONObject.quote(structure == null ? "" : structure) + ")", null);
+                    + org.json.JSONObject.quote(structure == null ? "" : structure) + ","
+                    + org.json.JSONObject.quote(grid == null ? "" : grid) + ")", null);
             return;
         }
         if (request != CHOOSE_TIMETABLE || fileSelection == null) return;

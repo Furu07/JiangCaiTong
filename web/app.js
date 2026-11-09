@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.5.4';
+const APP_VERSION = '0.5.6';
 const $ = id => document.getElementById(id);
 const tabs = Array.from(document.querySelectorAll('[data-tab]'));
 const native = window.Android;
@@ -690,9 +690,19 @@ async function receiveSchoolAuthorization(restore) {
   }
 }
 
-window.academicPortalReturned = function (structure) {
-  $('academicStructure').hidden = !structure;
-  $('academicStructure').textContent = structure ? '本机脱敏结构 · ' + structure : '';
+window.academicPortalReturned = function (structure, grid) {
+  const summary = $('academicStructure');
+  summary.hidden = !structure && !grid;
+  summary.textContent = structure ? '本机脱敏结构 · ' + structure : '';
+  if (grid) {
+    try {
+      const schedule = JufeAcademicAdapter.parseSchedule({ format: 'jufe-portal-grid', content: grid },
+        JufeAcademicAdapter.schoolParsers);
+      summary.textContent += '\n已读取并校验 ' + schedule.courses.length + ' 个上课时段，未写入缓存。';
+    } catch (error) {
+      summary.textContent += '\n' + error.message;
+    }
+  }
   receiveSchoolAuthorization(false);
 };
 
