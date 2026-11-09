@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.5.9';
+const APP_VERSION = '0.5.10';
 const $ = id => document.getElementById(id);
 const tabs = Array.from(document.querySelectorAll('[data-tab]'));
 const native = window.Android;
@@ -409,7 +409,8 @@ function renderWater() {
       ? '本构建缺少经授权的 798 用水登录签名配置，暂不可申请短信。' : state.broken
       ? '本机登录状态已失效，请重新登录。'
       : '使用手机号、图形验证码和短信验证码登录。');
-  $('waterLoginOpen').hidden = connected;
+  $('waterLoginOpen').hidden = connected || !canStart;
+  $('waterOfficial').hidden = $('waterExternalHelp').hidden = !native || !native.openOfficialWater;
   $('waterRefresh').hidden = !connected;
   $('waterResults').hidden = !connected;
   ['waterRefresh', 'waterLoginCancel', 'billRefresh', 'billMore', 'phone', 'graph', 'sms']
@@ -469,6 +470,7 @@ function hideWaterForm() {
 }
 
 function showWaterForm() {
+  if (!Water.loginConfigured()) return;
   select('life');
   $('waterForm').hidden = false;
   $('phone').focus();
@@ -638,6 +640,7 @@ tabs.forEach(button => button.addEventListener('click', () => select(button.data
 $('studyLogin').addEventListener('click', openStudyLogin);
 $('studyRefresh').addEventListener('click', () => queryStudy(null));
 $('waterLoginOpen').addEventListener('click', showWaterForm);
+$('waterOfficial').addEventListener('click', () => native.openOfficialWater());
 $('waterLoginCancel').addEventListener('click', hideWaterForm);
 $('phone').addEventListener('input', () => {
   Water.clearLoginAttempt();

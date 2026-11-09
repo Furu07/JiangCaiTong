@@ -84,9 +84,11 @@
           <h2>慧生活798</h2>
           <p class="sub" id="waterStatus" role="status"></p>
           <div class="controls">
-            <button class="btn primary" id="waterLoginOpen">手机验证码登录</button>
+            <button class="btn primary" id="waterLoginOpen" hidden>手机验证码登录</button>
+            <button class="btn" id="waterOfficial" hidden>打开官方慧生活798（外部服务）</button>
             <button class="btn" id="waterRefresh" hidden>刷新余额与设备</button>
           </div>
+          <p class="sub" id="waterExternalHelp" hidden>使用官方 App 查看余额、设备和消费记录。未安装时打开应用商店页面。</p>
           <form id="waterForm" autocomplete="off" hidden>
             <label>手机号<input id="phone" inputmode="numeric" type="tel" maxlength="11" required></label>
             <label>图形验证码<input id="graph" maxlength="12"></label>
