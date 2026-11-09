@@ -7,7 +7,6 @@
     UA: 'Android_ilife798_3.1.10',
     T_DEVICE: '1,1',
     V_DEVICE: '3.1.10',
-    SALT_APP: '[REDACTED_798_SIGNING_MATERIAL]',
     SIGN_MSG: '慧生活拒绝了请求签名，请检查客户端兼容性'
   };
 
@@ -16,6 +15,13 @@
   const diagnostics = [];
   const diagnosticEnabled = () => !!(window.Android && Android.debugDiagnosticsEnabled
     && Android.debugDiagnosticsEnabled());
+  const loginConfigured = () => !!(window.Android && Android.waterLoginConfigured
+    && Android.waterLoginConfigured());
+  const protocolState = () => ({ channel: 'app', protocolVersion: WATER.V_DEVICE, signingConfigured: loginConfigured() });
+
+  function requireLoginConfig() {
+    if (!loginConfigured()) throw wErr('本构建缺少经授权的 798 用水登录签名配置', 'config');
+  }
 
   function clearLoginAttempt() {
     if (smsAttempt && window.Android && Android.clearWaterAttempt) Android.clearWaterAttempt(smsAttempt.id);
@@ -23,7 +29,7 @@
   }
 
   async function authOperation(phase, challenge, action) {
-    const context = {};
+    const context = { phase };
     const started = performance.now();
     let failure;
     try {
@@ -38,15 +44,17 @@
     } finally {
       if (diagnosticEnabled()) {
         const kinds = ['net', 'data', 'limit', 'sign', 'client', 'params', 'deny',
-          'otp-invalid', 'otp-expired', 'otp-rejected', 'captcha', 'session', 'storage'];
+          'otp-invalid', 'otp-expired', 'otp-rejected', 'captcha', 'session', 'storage', 'config'];
         const exceptions = ['Timeout', 'TLS', 'Policy', 'IO', 'Other', 'TypeError', 'SyntaxError'];
         diagnostics.push({
-          phase, http: Number.isInteger(context.http) ? context.http : null,
+          phase, ...protocolState(),
+          http: Number.isInteger(context.http) ? context.http : null,
           code: Number.isInteger(context.code) && Math.abs(context.code) < 1000000 ? context.code : null,
           kind: failure ? (kinds.includes(failure.kind) ? failure.kind : 'data') : 'success',
           challenge, cookieSent: context.cookieSent === true, cookiePresent: context.cookiePresent === true,
           setCookiePresent: context.setCookiePresent ?? null,
           messageField: context.messageField ?? null,
+          accountEnvelope: context.accountEnvelope ?? null, tokenPresent: context.tokenPresent ?? null,
           elapsedMs: Math.round(performance.now() - started),
           exception: exceptions.includes(context.exception) ? context.exception : null
         });
@@ -63,77 +71,8 @@
   }
 
   function wKey() {
-    var cs = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    var s = '';
-    for (var i = 0; i < 10; i++) s += cs.charAt(Math.floor(Math.random() * cs.length));
-    return s;
-  }
-
-  function wMd5(str) {
-    function toBytes(s) {
-      var out = [], i, c;
-      for (i = 0; i < s.length; i++) {
-        c = s.charCodeAt(i);
-        if (c < 0x80) {
-          out.push(c);
-        } else if (c < 0x800) {
-          out.push(0xC0 | (c >> 6), 0x80 | (c & 63));
-        } else if (c < 0xD800 || c >= 0xE000) {
-          out.push(0xE0 | (c >> 12), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
-        } else {
-          i++;
-          var c2 = s.charCodeAt(i) || 0;
-          var cp = 0x10000 + (((c & 0x3FF) << 10) | (c2 & 0x3FF));
-          out.push(0xF0 | (cp >> 18), 0x80 | ((cp >> 12) & 63),
-                   0x80 | ((cp >> 6) & 63), 0x80 | (cp & 63));
-        }
-      }
-      return out;
-    }
-    var K = [], i;
-    for (i = 0; i < 64; i++) {
-      K[i] = Math.floor(Math.abs(Math.sin(i + 1)) * 4294967296) | 0;
-    }
-    var S = [7, 12, 17, 22, 5, 9, 14, 20, 4, 11, 16, 23, 6, 10, 15, 21];
-
-    var bytes = toBytes(String(str == null ? '' : str));
-    var bitLen = bytes.length * 8;
-    bytes.push(0x80);
-    while (bytes.length % 64 !== 56) bytes.push(0);
-    var lo = bitLen >>> 0, hi = Math.floor(bitLen / 4294967296) >>> 0;
-    bytes.push(lo & 255, (lo >>> 8) & 255, (lo >>> 16) & 255, (lo >>> 24) & 255);
-    bytes.push(hi & 255, (hi >>> 8) & 255, (hi >>> 16) & 255, (hi >>> 24) & 255);
-
-    var a0 = 0x67452301, b0 = 0xEFCDAB89, c0 = 0x98BADCFE, d0 = 0x10325476;
-    for (var off = 0; off < bytes.length; off += 64) {
-      var M = [];
-      for (i = 0; i < 16; i++) {
-        M[i] = (bytes[off + i * 4] | (bytes[off + i * 4 + 1] << 8)
-                | (bytes[off + i * 4 + 2] << 16) | (bytes[off + i * 4 + 3] << 24)) | 0;
-      }
-      var A = a0, B = b0, C = c0, D = d0;
-      for (i = 0; i < 64; i++) {
-        var F, g;
-        if (i < 16) { F = (B & C) | (~B & D); g = i; }
-        else if (i < 32) { F = (D & B) | (~D & C); g = (5 * i + 1) % 16; }
-        else if (i < 48) { F = B ^ C ^ D; g = (3 * i + 5) % 16; }
-        else { F = C ^ (B | ~D); g = (7 * i) % 16; }
-        F = (F + A + K[i] + M[g]) | 0;
-        var sh = S[(i >> 4) * 4 + (i % 4)];
-        A = D; D = C; C = B;
-        B = (B + (((F << sh) | (F >>> (32 - sh))) | 0)) | 0;
-      }
-      a0 = (a0 + A) | 0; b0 = (b0 + B) | 0;
-      c0 = (c0 + C) | 0; d0 = (d0 + D) | 0;
-    }
-    function hex(n) {
-      var s = '';
-      for (var j = 0; j < 4; j++) {
-        s += ('0' + (((n >>> (j * 8)) & 255).toString(16))).slice(-2);
-      }
-      return s;
-    }
-    return hex(a0) + hex(b0) + hex(c0) + hex(d0);
+    const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    return Array.from(crypto.getRandomValues(new Uint8Array(10)), value => chars[value % chars.length]).join('');
   }
 
   function wCheck(js, phase, context) {
@@ -147,17 +86,12 @@
       .find(field => typeof js[field] === 'string' && js[field].trim());
     if (context) context.messageField = messageField;
     const msg = phase ? (messageField ? js[messageField].trim() : '') : String(js.msg || '');
-    // 签名被拒要单独标出来：签名里有个 30 秒的时间桶，**本机时间偏太多**
-    // 就会被判「验签失败」—— 这是用户自己能动的那一种（另外一种是平台换盐，
-    // 那得我们改）。以前这里只说「可能需要更新 App」，等于什么都没说。
-    // 🔴 这句话和 water.py 的 SIGN_MSG **一字不差**（对拍）。
     if (/签名|sign/i.test(msg)) throw wErr(WATER.SIGN_MSG, 'sign', code);
     if (/频繁|限流/.test(msg)) throw wErr('请求太频繁，请稍后再试', 'limit', code);
     // 平台原话「请升级最新版应用」—— 照抄显示，用户会以为**我们**这个 App 该更新。
     // 说清是慧生活那边的要求，并给出这段时间唯一的办法。
-    if (/升级/.test(msg) && /应用/.test(msg)) {
-      throw wErr('慧生活那边现在只认它最新版的 App，我们这边暂时被挡在外面；'
-                 + '这段时间接水、积分先用官方「慧生活798」App', 'client', code);
+    if (/升级|最新版|版本过低/.test(msg) && /应用|客户端|app|版本/i.test(msg)) {
+      throw wErr('798 要求升级客户端，当前请求未通过版本校验', 'client', code);
     }
     if (phase) {
       if (code === -99 || /会话|不匹配|不一致/.test(msg)) {
@@ -210,11 +144,6 @@
     return isFinite(n) ? n : null;
   }
 
-  function wSignLogin(phone, sms) {
-    return wMd5('authCode=' + String(sms == null ? '' : sms)
-                + '&un=' + String(phone == null ? '' : phone) + WATER.SALT_APP);
-  }
-
   async function wReq(method, path, token, body, attempt, context) {
     const headers = {
       'User-Agent': WATER.UA,
@@ -235,6 +164,17 @@
       context.exception = response.exception;
     }
     if (response.status === 202 || response.status === 429) throw wErr('请求太频繁，请稍后再试', 'limit');
+    if (context && [400, 401, 403].includes(response.status)) {
+      let body;
+      try { body = JSON.parse(response.body); } catch (error) { /* HTTP fallback below. */ }
+      if (body) {
+        try {
+          wCheck(body, context.phase, context);
+        } catch (error) {
+          if (error.kind !== 'deny' && error.kind !== 'data') throw error;
+        }
+      }
+    }
     if (response.status === 401 || response.status === 403) {
       throw context ? wErr('798 拒绝了本次验证码请求', 'deny')
         : wErr('慧生活登录已失效或请求被拒绝', 'auth');
@@ -278,12 +218,14 @@
     },
 
     captcha: function () {
+      clearLoginAttempt();
       const key = wKey();
       return { key, url: WATER.BASE + '/captcha/?s=' + encodeURIComponent(key) + '&r=' + Date.now() };
     },
 
     sendSms: function (phone, key, graph) {
       return authOperation('sms', !!key && !!graph, async context => {
+        requireLoginConfig();
         if (!/^1\d{10}$/.test(phone) || !key || !graph) throw wErr('请输入手机号和图形验证码', 'params');
         clearLoginAttempt();
         const id = wKey();
@@ -291,6 +233,7 @@
         smsAttempt = pending;
         try {
           wCheck(await wReq('POST', '/acc/login/code', null, { un: phone, authCode: graph, s: key }, id, context), 'sms', context);
+          if (smsAttempt !== pending) throw wErr('验证码会话已取消，请重新获取', 'session');
           pending.issued = true;
         } catch (error) {
           clearLoginAttempt();
@@ -301,31 +244,42 @@
 
     login: function (phone, sms) {
       return authOperation('login', !!(smsAttempt && smsAttempt.issued), async context => {
+        requireLoginConfig();
         if (!/^1\d{10}$/.test(phone) || typeof sms !== 'string' || !/^\d{4,10}$/.test(sms)) {
           throw wErr('请输入有效的手机号和短信验证码', 'params');
         }
         if (!smsAttempt || !smsAttempt.issued || smsAttempt.phone !== phone) {
           throw wErr('手机号与本次短信会话不匹配，请为该号码在应用内获取验证码', 'session');
         }
-        const path = '/acc/login?sign=' + wSignLogin(phone, sms);
+        const pending = smsAttempt;
+        const signature = Android.signWaterLogin(phone, sms);
+        if (!/^[0-9a-f]{32}$/.test(signature)) throw wErr('本机未能生成 798 登录签名', 'config');
+        const path = '/acc/login?sign=' + signature;
         let data;
         try {
-          data = wCheck(await wReq('POST', path, null, { un: phone, authCode: sms }, smsAttempt.id, context), 'login', context) || {};
+          data = wCheck(await wReq('POST', path, null, { un: phone, authCode: sms }, pending.id, context), 'login', context);
         } catch (error) {
           if (error.kind === 'otp-expired' || error.kind === 'session') clearLoginAttempt();
           throw error;
         }
+        if (smsAttempt !== pending) throw wErr('验证码会话已取消，未保存登录状态', 'session');
         clearLoginAttempt();
-        const account = data.al || data;
-        const token = String(account.token || '').trim();
-        if (!token) throw wErr('平台未返回登录会话', 'data');
+        const account = data && data.al;
+        context.accountEnvelope = !!account && typeof account === 'object' && !Array.isArray(account);
+        const token = context.accountEnvelope && typeof account.token === 'string' ? account.token.trim() : '';
+        context.tokenPresent = !!token;
+        if (!token || token.length > 4096 || /[\x00-\x1f\x7f]/.test(token)) {
+          throw wErr('798 返回成功，但未提供有效的用水账号会话', 'data');
+        }
         const failure = wSave({ token, devices: [], at: 0 });
         if (failure) throw wErr('798 已通过验证，但本机未能安全保存会话', 'storage');
       });
     },
 
-    clearLoginAttempt,
-    diagnostics: () => diagnosticEnabled() ? diagnostics.map(entry => ({ ...entry })) : [],
+    clearLoginAttempt, loginConfigured,
+    canLogin: phone => !!(smsAttempt && smsAttempt.issued && smsAttempt.phone === phone),
+    diagnostics: () => diagnosticEnabled()
+      ? [{ phase: 'configuration', ...protocolState() }, ...diagnostics.map(entry => ({ ...entry }))] : [],
     logout: function () { clearLoginAttempt(); Android.clearWater(); },
 
     balance: async function () {

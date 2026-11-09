@@ -1,5 +1,6 @@
 """Build a locally signed Debug APK with Android SDK command-line tools."""
 from pathlib import Path
+import base64
 import os
 import re
 import shutil
@@ -9,8 +10,8 @@ import zipfile
 
 ANDROID = Path(__file__).resolve().parent
 ROOT = ANDROID.parent
-VERSION = "0.5.8"
-VERSION_CODE = 13
+VERSION = "0.5.9"
+VERSION_CODE = 14
 MIN_SDK = 26
 TARGET_SDK = 33
 BUILD_TOOLS = "35.0.0"
@@ -69,6 +70,11 @@ def main():
     app = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
     if not re.search(r"^const APP_VERSION = '" + re.escape(VERSION) + r"';$", app, re.M):
         raise SystemExit("web/app.js 的版本与 Android 构建配置不一致。")
+    salt = os.environ.get("JCT_WATER_APP_SIGN_SALT", "")
+    if salt and (salt != salt.strip() or not salt.isprintable() or len(salt.encode("utf-8")) > 256
+                 or salt.lower() in {"your_app_sign_salt_here", "your_salt_here", "test-salt"}
+                 or re.fullmatch(r"(?:[A-Z][a-z]){13}\d+", salt)):
+        raise SystemExit("JCT_WATER_APP_SIGN_SALT 格式无效或为示例值。")
 
     # Keep SDK/JDK temporary paths ASCII on Windows where aapt2 may reject Unicode paths.
     with tempfile.TemporaryDirectory(prefix="jct-apk-") as temp:
@@ -82,6 +88,12 @@ def main():
         classes = build / "classes"
         generated.mkdir()
         classes.mkdir()
+        package = generated / "com" / "jxufe" / "jct"
+        package.mkdir(parents=True)
+        encoded = base64.b64encode(salt.encode("utf-8")).decode("ascii")
+        (package / "WaterLoginConfig.java").write_text(
+            'package com.jxufe.jct;\nfinal class WaterLoginConfig {\n'
+            f'    static final String SALT_BASE64 = "{encoded}";\n' '}\n', encoding="ascii")
 
         compiled = build / "resources.zip"
         raw = build / "resources.apk"

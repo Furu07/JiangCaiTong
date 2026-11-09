@@ -268,6 +268,26 @@ public final class NativeBridge {
     @JavascriptInterface public void cxInvalidate(String expected) { CxNet.invalidate(expected); }
     @JavascriptInterface public String loadWater() { return CredStore.loadWater(); }
     @JavascriptInterface public String saveWater(String value) { return CredStore.saveWater(value); }
+    @JavascriptInterface public boolean waterLoginConfigured() { return !WaterLoginConfig.SALT_BASE64.isEmpty(); }
+
+    @JavascriptInterface
+    public String signWaterLogin(String phone, String code) {
+        if (!waterLoginConfigured() || phone == null || !phone.matches("1\\d{10}")
+                || code == null || !code.matches("\\d{4,10}")) return "";
+        try {
+            java.security.MessageDigest digest = java.security.MessageDigest.getInstance("MD5");
+            digest.update(("authCode=" + code + "&un=" + phone).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            byte[] hash = digest.digest(android.util.Base64.decode(WaterLoginConfig.SALT_BASE64, android.util.Base64.NO_WRAP));
+            StringBuilder signature = new StringBuilder(hash.length * 2);
+            for (byte value : hash) {
+                signature.append(Character.forDigit((value & 0xff) >>> 4, 16));
+                signature.append(Character.forDigit(value & 0xf, 16));
+            }
+            return signature.toString();
+        } catch (java.security.NoSuchAlgorithmException error) {
+            return "";
+        }
+    }
     @JavascriptInterface public String waterState() { return CredStore.waterState(); }
     @JavascriptInterface public void clearWater() { CredStore.clearWater(); }
 
