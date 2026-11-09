@@ -1,4 +1,4 @@
-/* JUFE adapter boundary. The bundled codecs read JCT exchange fixtures. */
+/* JUFE adapter boundary and timetable codecs. */
 (function () {
   'use strict';
 
@@ -133,6 +133,37 @@
     return { ...term, courses, changes };
   }
 
+  // Internal projection of the observed personal timetable grid. The school
+  // page does not return this envelope. A reader must supply verified term
+  // metadata and one entry per course block in its corresponding weekday.
+  function fromPortalGrid(content) {
+    const data = JSON.parse(content);
+    fields(data, ['term', 'blocks']);
+    fields(data.term, termFields);
+    if (!Array.isArray(data.blocks) || !data.blocks.length) {
+      throw new AcademicError('format', '未取得已确认的个人课表课程块');
+    }
+    const weekdays = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日'];
+    const courses = data.blocks.map((block, index) => {
+      fields(block, ['weekday', 'text']);
+      const day = weekdays.indexOf(block.weekday) + 1;
+      const lines = typeof block.text === 'string' ? block.text.split(/\r?\n/).map(line => line.trim()) : [];
+      if (!day || lines.length !== 4 || lines.some(line => !line)) {
+        throw new AcademicError('format', '个人课表课程块的星期或行结构无法识别');
+      }
+      const [name, teacher, time, place] = lines;
+      const slot = /^([^\[\]]+)\[(\d{1,2})(?:-(\d{1,2}))?\]$/.exec(time);
+      if (!slot) throw new AcademicError('format', '个人课表上课时间格式无法识别');
+      const campus = /^(\S.*?)\s*[(（]([^()（）]+校区)[)）]$/.exec(place);
+      return {
+        id: 'jufe-grid-' + (index + 1), name, teacher, day,
+        weekText: slot[1].trim(), startPeriod: Number(slot[2]), endPeriod: Number(slot[3] || slot[2]),
+        location: campus ? campus[1].trim() : place, campus: campus ? campus[2].trim() : ''
+      };
+    });
+    return { ...readTerm(data.term), courses };
+  }
+
   function parseSchedule(response, parsers = fixtureParsers) {
     if (!response) throw new AcademicError('format', '未收到课表数据');
     const parser = Object.prototype.hasOwnProperty.call(parsers, response.format) && parsers[response.format];
@@ -228,10 +259,10 @@
   }
 
   const fixtureParsers = Object.freeze({ json: fromJson, html: fromHtml });
-  // Register a codec here only after the corresponding school response has been verified.
   const schoolParsers = Object.freeze({
     'jufe-html': null,
-    'jufe-json': null
+    'jufe-json': null,
+    'jufe-portal-grid': fromPortalGrid
   });
   window.JufeAcademicAdapter = { create: createAdapter, parseSchedule, fixtureParsers, schoolParsers, schoolTransport: null };
 })();
