@@ -1,0 +1,7 @@
+/hangyuantong-main/
+/hangyuantong-main.zip
+/android/build/
+/android/dist/
+__pycache__/
+*.keystore
+*.jks
