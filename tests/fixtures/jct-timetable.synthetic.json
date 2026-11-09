@@ -1,0 +1,33 @@
+{
+  "schema": "jct-timetable/1",
+  "term": {
+    "id": "fixture-autumn",
+    "label": "合成样本学期",
+    "firstMonday": "2026-09-07",
+    "totalWeeks": 6,
+    "weekMondays": ["2026-09-07", "2026-09-14", "2026-09-28", "2026-10-05", "2026-10-12", "2026-10-19"]
+  },
+  "courses": [
+    {
+      "id": "stats",
+      "name": "样本统计课",
+      "teacher": "示例教师",
+      "meetings": [
+        {"id": "stats-a", "day": 2, "startPeriod": 1, "endPeriod": 3, "weekText": "1-5周（单）", "campus": "校区 A", "building": "教学楼 A", "location": "101"},
+        {"id": "stats-b", "day": 5, "startPeriod": 6, "endPeriod": 7, "weekText": "2、4-6周（双）", "campus": "校区 B", "building": "实验楼 B", "location": "202"}
+      ]
+    },
+    {
+      "id": "econ",
+      "name": "样本经济学",
+      "meetings": [
+        {"id": "econ-a", "day": 3, "startPeriod": 4, "endPeriod": 5, "weekText": "1-6周"},
+        {"id": "econ-extra", "day": 6, "startPeriod": 6, "endPeriod": 7, "weekText": "4周", "kind": "special", "note": "示例讲座"}
+      ]
+    }
+  ],
+  "changes": [
+    {"meetingId": "stats-a", "week": 3, "action": "move", "target": {"date": "2026-10-07", "startPeriod": 3, "endPeriod": 4, "campus": "校区 B", "building": "教学楼 C", "location": "301"}, "note": "示例调课"},
+    {"meetingId": "stats-b", "week": 2, "action": "cancel", "note": "示例停课"}
+  ]
+}

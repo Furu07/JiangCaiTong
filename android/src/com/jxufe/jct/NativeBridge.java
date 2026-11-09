@@ -1,10 +1,12 @@
 package com.jxufe.jct;
 
+import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.net.Uri;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebView;
+import android.widget.Toast;
 
 import org.json.JSONObject;
 
@@ -14,7 +16,10 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.Collections;
 import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -74,7 +79,7 @@ public final class NativeBridge {
 
     private static boolean allowed(String method, URL url) {
         Uri uri = Uri.parse(url.toString());
-        if (isChaoxing(uri)) return "GET".equals(method);
+        if (isChaoxing(uri)) return CxNet.isHost(uri.getHost()) && "GET".equals(method);
         if (!isHttps(uri) || !WATER_HOST.equals(uri.getHost())) return false;
         String path = url.getPath();
         if ("GET".equals(method)) {
@@ -89,6 +94,7 @@ public final class NativeBridge {
     private static JSONObject request(String method, URL url, String body, String referer,
                                       String headers) throws Exception {
         boolean study = isChaoxing(Uri.parse(url.toString()));
+        java.net.CookieManager studyCookies = study ? CxNet.cookieJar() : null;
         String customHeaders = headers;
         for (int redirects = 0; redirects <= 5; redirects++) {
             if (!allowed(method, url)) throw new SecurityException("Unsupported request");
@@ -103,7 +109,13 @@ public final class NativeBridge {
                 if (study && !referer.isEmpty() && isChaoxing(Uri.parse(referer))) {
                     connection.setRequestProperty("Referer", referer);
                 }
-                applyHeaders(connection, customHeaders);
+                applyHeaders(connection, customHeaders, study);
+                if (studyCookies != null) {
+                    for (Map.Entry<String, List<String>> header :
+                            studyCookies.get(url.toURI(), Collections.emptyMap()).entrySet()) {
+                        for (String value : header.getValue()) connection.addRequestProperty(header.getKey(), value);
+                    }
+                }
                 if ("POST".equals(method)) {
                     byte[] payload = body.getBytes(StandardCharsets.UTF_8);
                     connection.setDoOutput(true);
@@ -113,11 +125,12 @@ public final class NativeBridge {
                     }
                 }
                 int status = connection.getResponseCode();
+                if (studyCookies != null) studyCookies.put(url.toURI(), connection.getHeaderFields());
                 if (study && status >= 300 && status < 400) {
                     String location = connection.getHeaderField("Location");
                     if (location != null && !location.isEmpty()) {
                         URL next = new URL(url, location);
-                        if (!isChaoxing(Uri.parse(next.toString()))) break;
+                        if (!allowed(method, next) || !isChaoxing(Uri.parse(next.toString()))) break;
                         if (!url.getHost().equals(next.getHost())) customHeaders = "";
                         url = next;
                         continue;
@@ -136,20 +149,22 @@ public final class NativeBridge {
         throw new SecurityException("Unsupported redirect");
     }
 
-    private static void applyHeaders(HttpURLConnection connection, String headers) throws Exception {
+    private static void applyHeaders(HttpURLConnection connection, String headers, boolean study) throws Exception {
         if (headers.isEmpty()) return;
         JSONObject values = new JSONObject(headers);
         Iterator<String> keys = values.keys();
         while (keys.hasNext()) {
             String key = keys.next();
             switch (key) {
+                case "Authorization":
+                    if (!study) connection.setRequestProperty(key, values.getString(key));
+                    break;
                 case "User-Agent":
                 case "Accept":
                 case "Accept-Language":
                 case "Content-Type":
                 case "ApplicationType":
                 case "VersionCode":
-                case "Authorization":
                 case "X-Requested-With":
                     connection.setRequestProperty(key, values.getString(key));
                     break;
@@ -173,7 +188,7 @@ public final class NativeBridge {
     }
 
     @JavascriptInterface public boolean cxHasLogin() { return CxNet.hasLogin(); }
-    @JavascriptInterface public String cxPersist() { return CredStore.saveCx(CxNet.dumpCookies()); }
+    @JavascriptInterface public String cxPersist() { return CxNet.persist(); }
     @JavascriptInterface public String loadWater() { return CredStore.loadWater(); }
     @JavascriptInterface public String saveWater(String value) { return CredStore.saveWater(value); }
     @JavascriptInterface public String waterState() { return CredStore.waterState(); }
@@ -181,8 +196,7 @@ public final class NativeBridge {
 
     @JavascriptInterface
     public void cxClear() {
-        CxNet.clearCookies();
-        CredStore.clearCx();
+        CxNet.clearSession();
         clearingWebCookies = true;
         web.post(() -> CookieManager.getInstance().removeAllCookies(removed -> {
             CookieManager.getInstance().flush();
@@ -197,6 +211,21 @@ public final class NativeBridge {
             if (!closed) web.getContext().startActivity(new Intent(web.getContext(), WebActivity.class));
         });
         return true;
+    }
+
+    @JavascriptInterface
+    public void openAcademicPortal() {
+        web.post(() -> {
+            if (closed) return;
+            Intent intent = new Intent(Intent.ACTION_VIEW,
+                    Uri.parse("https://jwxt.jxufe.edu.cn/jxcjcaslogin"));
+            intent.addCategory(Intent.CATEGORY_BROWSABLE);
+            try {
+                web.getContext().startActivity(intent);
+            } catch (ActivityNotFoundException e) {
+                Toast.makeText(web.getContext(), "系统浏览器暂不可用", Toast.LENGTH_SHORT).show();
+            }
+        });
     }
 
     @JavascriptInterface

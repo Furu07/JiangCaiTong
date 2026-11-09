@@ -12,10 +12,7 @@ public class App extends Application {
     public void onCreate() {
         super.onCreate();
         ctx = getApplicationContext();
-        java.net.CookieHandler.setDefault(new java.net.CookieManager(
-                null, (uri, cookie) -> NativeBridge.isChaoxing(android.net.Uri.parse(uri.toString()))
-                        && java.net.CookiePolicy.ACCEPT_ORIGINAL_SERVER.shouldAccept(uri, cookie)));
-        CxNet.loadCookies(CredStore.loadCx());
+        CxNet.restore();
     }
 
     public static Context ctx() {

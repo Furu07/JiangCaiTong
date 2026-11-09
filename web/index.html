@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="app.css">
   <script defer src="native.js"></script>
   <script defer src="academic.js"></script>
+  <script defer src="jufe-academic.js"></script>
   <script defer src="learning.js"></script>
   <script defer src="water.js"></script>
   <script defer src="app.js"></script>
@@ -18,7 +19,8 @@
       <header class="pagehead"><h1>课表</h1><button class="btn" id="scheduleSync">同步示例</button></header>
       <div class="scroll">
         <div class="card pad">
-          <strong id="term">模拟课表</strong>
+          <label for="term">示例学期</label>
+          <select id="term"></select>
           <p class="sub" id="scheduleStatus" role="status">正在读取课表…</p>
           <div class="controls">
             <button class="btn" id="previousWeek">上一周</button>
@@ -32,6 +34,11 @@
           </div>
         </div>
         <div id="schedule"></div>
+        <section class="card pad">
+          <h2>江财本科教务</h2>
+          <p class="sub">在系统浏览器打开官方入口。酱菜通的个人课表对接等待授权样本。</p>
+          <button class="btn" id="academicOfficial">打开学校官方教务</button>
+        </section>
       </div>
     </main>
     <main class="page" id="page-study" hidden>

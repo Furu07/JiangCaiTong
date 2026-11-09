@@ -250,7 +250,9 @@ input { display: block; width: 100%; }
 .course small { color: var(--sub); margin-top: 2px; }
 .week-schedule .course { font-size: 11px; padding: 4px 2px; }
 .week-schedule .course small { font-size: 10px; }
-.week-schedule .course small:last-child { display: none; }
+.week-schedule .course .course-location { display: none; }
+.course .course-conflict { font-weight: 700; color: var(--accent); }
+#term { max-width: 100%; }
 
 .result-group, .result-row { padding: 10px 0; border-top: 1px solid var(--line); }
 .result-row p { margin-bottom: 0; }

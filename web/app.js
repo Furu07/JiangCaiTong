@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.1.0';
+const APP_VERSION = '0.2.0';
 const $ = id => document.getElementById(id);
 const tabs = Array.from(document.querySelectorAll('[data-tab]'));
 const native = window.Android;
@@ -60,7 +60,7 @@ function closeDetails() {
 window.closeDetails = closeDetails;
 
 const scheduleRepo = Academic.createRepository(Academic.mockAdapter, window.localStorage);
-let snapshot = scheduleRepo.read();
+let snapshot = null;
 let week = 1;
 let day = (new Date().getDay() + 6) % 7 + 1;
 let daily = false;
@@ -74,14 +74,20 @@ function courseButton(course) {
   const button = node('button', null, 'course');
   button.appendChild(node('span', course.name));
   button.appendChild(node('small', periodLabel(course)));
-  button.appendChild(node('small', course.location || '地点待定'));
+  const location = [course.campus, course.building, course.location].filter(Boolean).join(' · ');
+  button.appendChild(node('small', location || '地点待定', 'course-location'));
+  if (course.kind === 'moved') button.appendChild(node('small', '调课'));
+  if (course.kind === 'special') button.appendChild(node('small', '特殊安排'));
+  if (course.conflict) button.appendChild(node('small', '冲突', 'course-conflict'));
   button.addEventListener('click', () => showDetails(course.name, [
     days[course.day - 1] + ' · ' + periodLabel(course),
     '教师 · ' + (course.teacher || '待定'),
-    '地点 · ' + (course.location || '待定'),
+    '地点 · ' + (location || '待定'),
+    course.conflict ? '该时段与其他课程重叠' : '',
+    course.note,
     '教学周 · ' + course.weekText,
     '数据来源 · ' + Academic.mockAdapter.label
-  ]));
+  ].filter(Boolean)));
   return button;
 }
 
@@ -113,10 +119,10 @@ function renderSchedule() {
 }
 
 function installSchedule(entry, label) {
-  const wasEmpty = !snapshot;
+  const termChanged = !snapshot || snapshot.schedule.termId !== entry.schedule.termId;
   snapshot = entry;
   const schedule = snapshot.schedule;
-  if (wasEmpty || !$('week').options.length) {
+  if (termChanged) {
     week = Math.max(1, Math.min(schedule.totalWeeks, Academic.currentWeek(schedule, new Date())));
   }
   week = Math.min(week, schedule.totalWeeks);
@@ -124,20 +130,25 @@ function installSchedule(entry, label) {
   for (let number = 1; number <= schedule.totalWeeks; number++) {
     $('week').add(new Option('第 ' + number + ' 周', number));
   }
-  $('term').textContent = schedule.term;
   $('scheduleStatus').textContent = Academic.mockAdapter.label + ' · ' + label + ' · ' + time(entry.syncedAt);
   renderSchedule();
 }
 
 async function syncSchedule() {
+  const termId = $('term').value;
+  if (!termId) return;
+  $('term').disabled = true;
   $('scheduleSync').disabled = true;
   $('scheduleStatus').textContent = '正在读取本机示例…';
   try {
-    const entry = await scheduleRepo.sync();
-    installSchedule(entry, entry.cached ? '已更新离线缓存' : '仅本次可用，缓存写入失败');
+    const entry = await scheduleRepo.sync(termId);
+    const label = entry.status === 'fallback' ? '同步失败，显示上次缓存'
+      : entry.cached ? '已更新离线缓存' : '仅本次可用，缓存写入失败';
+    installSchedule(entry, label);
   } catch (error) {
     $('scheduleStatus').textContent = '同步失败' + (snapshot ? '，继续显示上次课表' : '') + ' · ' + error.message;
   } finally {
+    $('term').disabled = false;
     $('scheduleSync').disabled = false;
   }
 }
@@ -549,6 +560,11 @@ $('clearWebCache').addEventListener('click', () => {
 
 days.forEach((name, index) => $('day').add(new Option(name, index + 1)));
 $('scheduleSync').addEventListener('click', syncSchedule);
+$('term').addEventListener('change', loadSelectedTerm);
+$('academicOfficial').disabled = !native;
+$('academicOfficial').addEventListener('click', () => {
+  native.openAcademicPortal();
+});
 $('previousWeek').addEventListener('click', () => { week--; renderSchedule(); });
 $('nextWeek').addEventListener('click', () => { week++; renderSchedule(); });
 $('week').addEventListener('change', event => { week = Number(event.target.value); renderSchedule(); });
@@ -558,5 +574,20 @@ $('dayView').addEventListener('click', () => { daily = true; renderSchedule(); }
 $('appVersion').textContent = '版本 ' + APP_VERSION + ' · Debug';
 
 refreshSession();
-if (snapshot) installSchedule(snapshot, '已读取离线缓存');
-else syncSchedule();
+function loadSelectedTerm() {
+  const cached = scheduleRepo.read($('term').value);
+  if (cached) installSchedule(cached, '已读取离线缓存');
+  else {
+    snapshot = null;
+    empty($('schedule'));
+    empty($('week'));
+    $('previousWeek').disabled = true;
+    $('nextWeek').disabled = true;
+    syncSchedule();
+  }
+}
+
+Academic.mockAdapter.listTerms().then(terms => {
+  terms.forEach(term => $('term').add(new Option(term.term, term.termId)));
+  loadSelectedTerm();
+});

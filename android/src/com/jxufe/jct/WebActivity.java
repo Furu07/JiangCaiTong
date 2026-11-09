@@ -19,6 +19,7 @@ public class WebActivity extends Activity {
     private static final String LOGIN = "https://passport2.chaoxing.com/login?fid=&refer="
             + "https%3A%2F%2Fmooc2-ans.chaoxing.com%2Fmooc2-ans%2Fvisit%2Finteraction";
     private WebView web;
+    private Button done;
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -26,7 +27,7 @@ public class WebActivity extends Activity {
         super.onCreate(state);
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
-        Button done = new Button(this);
+        done = new Button(this);
         done.setText("完成登录并返回");
         done.setOnClickListener(view -> useSession());
         layout.addView(done);
@@ -42,7 +43,13 @@ public class WebActivity extends Activity {
         web.setWebViewClient(new StudyClient());
         layout.addView(web, new LinearLayout.LayoutParams(-1, 0, 1));
         setContentView(layout);
-        if (state == null || web.restoreState(state) == null) web.loadUrl(LOGIN);
+        if (state == null || web.restoreState(state) == null) {
+            done.setEnabled(false);
+            resetBrowserCookies(() -> {
+                done.setEnabled(true);
+                web.loadUrl(LOGIN);
+            });
+        }
     }
 
     private static final class StudyClient extends WebViewClient {
@@ -52,17 +59,30 @@ public class WebActivity extends Activity {
         }
     }
 
+    private void resetBrowserCookies(Runnable complete) {
+        CookieManager cookies = CookieManager.getInstance();
+        cookies.removeAllCookies(removed -> {
+            cookies.flush();
+            if (!isFinishing() && !isDestroyed()) complete.run();
+        });
+    }
+
     private void useSession() {
-        if (web.getUrl() == null || !NativeBridge.isChaoxing(Uri.parse(web.getUrl()))
-                || !CxNet.importWebSession(CookieManager.getInstance())) {
-            Toast.makeText(this, "尚未取得学习通登录状态，请完成页面登录", Toast.LENGTH_LONG).show();
+        Uri page = Uri.parse(web.getUrl() == null ? "" : web.getUrl());
+        try {
+            if (!NativeBridge.isChaoxing(page) || !CxNet.isHost(page.getHost())
+                    || "passport2.chaoxing.com".equals(page.getHost())
+                    || !CxNet.importWebSession(CookieManager.getInstance())) {
+                Toast.makeText(this, "请完成官方页面登录并进入学习通后再返回", Toast.LENGTH_LONG).show();
+                return;
+            }
+        } catch (IllegalStateException error) {
+            Toast.makeText(this, error.getMessage(), Toast.LENGTH_LONG).show();
             return;
         }
-        CookieManager.getInstance().flush();
-        if (!CredStore.saveCx(CxNet.dumpCookies()).isEmpty()) {
-            Toast.makeText(this, "登录状态已载入，暂时无法保存到本机", Toast.LENGTH_LONG).show();
-        }
-        finish();
+        done.setEnabled(false);
+        web.stopLoading();
+        resetBrowserCookies(this::finish);
     }
 
     @Override
