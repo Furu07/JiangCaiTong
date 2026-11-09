@@ -73,6 +73,10 @@ async function main() {
   assert(values.has('jct.academic.v2.' + JSON.stringify(['jufe', b.accountKey, term.termId])));
   assert.equal((await controller.bind(a)).status, 'fresh');
   assert.equal(displayed(reopen()), a.accountKey);
+  assert.equal(controller.protectAccount(b.accountKey), true);
+  assert.equal(displayed(reopen()), undefined);
+  assert.equal((await controller.restore(a)).status, 'fresh');
+  assert.equal(displayed(reopen()), a.accountKey);
   console.log('PASS JUFE first sync, restart refresh, offline fallback, and persistent account isolation');
 }
 

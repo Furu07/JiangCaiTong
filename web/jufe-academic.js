@@ -30,6 +30,17 @@
     });
   }
 
+  function portalTermLabel(id) {
+    for (const term of portalTerms.values()) if (term.id === id) return term.label;
+    return '';
+  }
+
+  function verifiedPortalTerms(labels, current) {
+    return [...new Set(labels)].filter(label => portalTerms.has(label)).map(label => ({
+      ...readTerm(portalTerms.get(label)), current: label === current
+    }));
+  }
+
   const placeFields = ['campus', 'building', 'location'];
   const slotFields = ['day', 'startPeriod', 'endPeriod', ...placeFields];
   const meetingFields = ['id', 'teacher', ...slotFields, 'weekText', 'kind', 'note'];
@@ -237,6 +248,7 @@
           expire();
           throw expiredError();
         }
+        if (error && error.code === 'account-changed') throw new AcademicError('account-changed', '教务账号已切换，请重新绑定');
         // Transport errors may include URLs or identifiers. Only expose classified messages.
         const statusCode = error && error.status;
         if (statusCode === 403) throw new AcademicError('permission', '学校拒绝访问该课表');
@@ -277,5 +289,7 @@
     'jufe-json': null,
     'jufe-portal-grid': fromPortalGrid
   });
-  window.JufeAcademicAdapter = { create: createAdapter, parseSchedule, fixtureParsers, schoolParsers, schoolTransport: null };
+  window.JufeAcademicAdapter = {
+    create: createAdapter, parseSchedule, fixtureParsers, schoolParsers, portalTermLabel, verifiedPortalTerms
+  };
 })();

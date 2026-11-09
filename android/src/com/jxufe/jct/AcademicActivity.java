@@ -19,6 +19,9 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.security.SecureRandom;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -60,6 +63,12 @@ public final class AcademicActivity extends Activity {
     private int inspectionId;
     private String diagnostic = "";
     private String gridProjection = "";
+    private String readerScript;
+    private boolean automatic;
+    private boolean interactive;
+    private boolean navigated;
+    private int automaticRun;
+    private String requestedTerm;
 
     static boolean isSchool(Uri uri) {
         return "https".equals(uri.getScheme()) && uri.getUserInfo() == null
@@ -71,6 +80,9 @@ public final class AcademicActivity extends Activity {
     @SuppressLint("SetJavaScriptEnabled")
     protected void onCreate(Bundle state) {
         super.onCreate(state);
+        automatic = getIntent().getBooleanExtra("automatic", false);
+        interactive = getIntent().getBooleanExtra("interactive", false);
+        requestedTerm = getIntent().getStringExtra("term");
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
         Button close = new Button(this);
@@ -82,10 +94,10 @@ public final class AcademicActivity extends Activity {
             inspect.setText("检查已打开的本人课表结构（Debug）");
             inspect.setOnClickListener(view -> inspectTimetable());
             layout.addView(inspect);
-            diagnosticView = new TextView(this);
-            diagnosticView.setVisibility(View.GONE);
-            layout.addView(diagnosticView);
         }
+        diagnosticView = new TextView(this);
+        diagnosticView.setVisibility(View.GONE);
+        layout.addView(diagnosticView);
 
         web = new WebView(this);
         WebSettings settings = web.getSettings();
@@ -100,13 +112,125 @@ public final class AcademicActivity extends Activity {
         layout.addView(web, new LinearLayout.LayoutParams(-1, 0, 1));
         setContentView(layout);
         if (state == null || web.restoreState(state) == null) web.loadUrl(ENTRY);
+        if (automatic && !interactive) web.postDelayed(() -> {
+            if (!isFinishing() && !isDestroyed()) finishSync(null, "request");
+        }, 30000);
     }
 
-    private static final class SchoolClient extends WebViewClient {
+    private final class SchoolClient extends WebViewClient {
         @Override
         public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
             return request.isForMainFrame() && !isSchool(request.getUrl());
         }
+
+        @Override public void onPageFinished(WebView view, String url) {
+            if (!automatic || isFinishing()) return;
+            Uri page = Uri.parse(url);
+            if (ACADEMIC.equals(page.getHost()) && isSchool(page)) {
+                navigated = false;
+                int run = ++automaticRun;
+                autoRead(run, 0);
+                if (interactive) web.postDelayed(() -> {
+                    if (run == automaticRun && !isFinishing() && !isDestroyed()) stopInteractiveRead();
+                }, 25000);
+            } else if (AUTH.equals(page.getHost()) && !interactive) {
+                finishSync(null, "expired");
+            }
+        }
+
+        @Override public void onReceivedError(WebView view, WebResourceRequest request,
+                                              android.webkit.WebResourceError error) {
+            if (automatic && request.isForMainFrame() && !isFinishing()) finishSync(null, "request");
+        }
+    }
+
+    private String readerExpression(String term, boolean navigate) throws IOException {
+        if (readerScript == null) {
+            try (InputStream input = getAssets().open("web/jufe-portal-reader.js");
+                 ByteArrayOutputStream bytes = new ByteArrayOutputStream()) {
+                byte[] buffer = new byte[4096];
+                for (int count; (count = input.read(buffer)) != -1;) bytes.write(buffer, 0, count);
+                readerScript = new String(bytes.toByteArray(), StandardCharsets.UTF_8);
+            }
+        }
+        return readerScript + "(" + JSONObject.quote(term == null ? "" : term) + "," + navigate + ")";
+    }
+
+    private void autoRead(int run, int attempt) {
+        if (run != automaticRun || isFinishing() || isDestroyed()) return;
+        Uri page = Uri.parse(web.getUrl() == null ? "" : web.getUrl());
+        if (!isSchool(page) || !ACADEMIC.equals(page.getHost())) return;
+        if (attempt >= 24) {
+            if (!interactive) finishSync(null, "request");
+            else stopInteractiveRead();
+            return;
+        }
+        try {
+            web.evaluateJavascript(readerExpression(requestedTerm, !navigated), result -> {
+                if (run != automaticRun || isFinishing() || isDestroyed()) return;
+                JSONObject response = readObject(result);
+                if (response != null && "opened".equals(response.optString("status"))) navigated = true;
+                String grid = sanitizeGridProjection(result);
+                if (!grid.isEmpty() && response != null) {
+                    finishVerified(grid, response);
+                } else {
+                    web.postDelayed(() -> autoRead(run, attempt + 1), 650);
+                }
+            });
+        } catch (IOException error) {
+            finishSync(null, "request");
+        }
+    }
+
+    private void stopInteractiveRead() {
+        automaticRun++;
+        showDiagnostic("未自动读到课表，请返回酱菜通后重试。");
+    }
+
+    private void finishVerified(String grid, JSONObject response) {
+        try {
+            String owner = response.getString("owner");
+            if (!owner.matches("\\d{5,20}")) throw new IllegalArgumentException();
+            JSONArray supplied = response.getJSONArray("terms");
+            JSONArray terms = new JSONArray();
+            for (int i = 0; i < Math.min(32, supplied.length()); i++) {
+                String label = supplied.optString(i);
+                if (label.matches("20\\d{2}-20\\d{2}学年第[一二]学期")) terms.put(label);
+            }
+            String current = response.optString("current");
+            if (!current.matches("20\\d{2}-20\\d{2}学年第[一二]学期")) throw new IllegalArgumentException();
+            JSONObject capture = new JSONObject().put("accountKey", accountKey(owner))
+                    .put("grid", grid).put("terms", terms).put("current", current);
+            finishSync(capture.toString(), "");
+        } catch (Exception error) {
+            finishSync(null, "format");
+        }
+    }
+
+    private String accountKey(String owner) throws Exception {
+        android.content.SharedPreferences preferences = getSharedPreferences("jufe_scope", MODE_PRIVATE);
+        String secret = preferences.getString("key", "");
+        if (secret.isEmpty()) {
+            byte[] random = new byte[32];
+            new SecureRandom().nextBytes(random);
+            secret = android.util.Base64.encodeToString(random, android.util.Base64.NO_WRAP);
+            if (!preferences.edit().putString("key", secret).commit()) throw new IOException();
+        }
+        Mac mac = Mac.getInstance("HmacSHA256");
+        mac.init(new SecretKeySpec(android.util.Base64.decode(secret, android.util.Base64.NO_WRAP), "HmacSHA256"));
+        return android.util.Base64.encodeToString(mac.doFinal(owner.getBytes(StandardCharsets.UTF_8)),
+                android.util.Base64.URL_SAFE | android.util.Base64.NO_WRAP | android.util.Base64.NO_PADDING);
+    }
+
+    private static JSONObject readObject(String result) {
+        if (result == null || result.length() > 65536) return null;
+        try { return new JSONObject(result); }
+        catch (org.json.JSONException error) { return null; }
+    }
+
+    private void finishSync(String capture, String error) {
+        setResult(RESULT_OK, new Intent().putExtra("capture", capture).putExtra("syncError", error));
+        finish();
     }
 
     private void inspectTimetable() {
@@ -136,11 +260,8 @@ public final class AcademicActivity extends Activity {
 
     private void readPortalGrid(int id) {
         final String script;
-        try (InputStream input = getAssets().open("web/jufe-portal-reader.js");
-             ByteArrayOutputStream bytes = new ByteArrayOutputStream()) {
-            byte[] buffer = new byte[4096];
-            for (int count; (count = input.read(buffer)) != -1;) bytes.write(buffer, 0, count);
-            script = new String(bytes.toByteArray(), StandardCharsets.UTF_8);
+        try {
+            script = readerExpression("", false);
         } catch (IOException error) {
             inspecting = false;
             showDiagnostic("课表读取脚本不可用。");
@@ -157,6 +278,11 @@ public final class AcademicActivity extends Activity {
                 return;
             }
             inspecting = false;
+            if (automatic) {
+                JSONObject verified = readObject(result);
+                if (verified != null) finishVerified(gridProjection, verified);
+                return;
+            }
             try {
                 JSONObject grid = new JSONObject(gridProjection);
                 diagnostic = new JSONObject().put("term", grid.getString("termLabel"))

@@ -53,12 +53,16 @@
       return promise;
     }
 
+    function protectAccount(accountKey) {
+      if (!binding || binding.accountKey === accountKey || binding.suspended) return false;
+      // A failed switch must not expose the previous owner's data, even after reopening.
+      publish({ ...binding, suspended: true });
+      return true;
+    }
+
     function bind(candidate) {
       return start('bind:' + candidate.accountKey, async () => {
-        if (binding && binding.accountKey !== candidate.accountKey && !binding.suspended) {
-          // A failed switch must not expose the previous owner's data, even after reopening.
-          publish({ ...binding, suspended: true });
-        }
+        protectAccount(candidate.accountKey);
         adapter.authorize(candidate);
         const initial = adapter.status();
         try {
@@ -95,7 +99,17 @@
       if ((!manual && local && now() - local.syncedAt < freshFor) || now() - lastAttempt < retryDelay) {
         return Promise.resolve(local);
       }
-      return start(key, () => repository.sync(termId));
+      return start(key, async () => {
+        try {
+          return await repository.sync(termId);
+        } catch (error) {
+          if (error.code === 'account-changed') {
+            publish({ ...binding, suspended: true });
+            adapter.signOut();
+          }
+          throw error;
+        }
+      });
     }
 
     function resume() {
@@ -104,14 +118,20 @@
         ? refresh(current.selected) : Promise.resolve(current.entry);
     }
 
-    function restore(candidate) {
+    function restore(candidate, manual = false) {
       if (!binding || binding.suspended || candidate.accountKey !== binding.accountKey) return bind(candidate);
       if (inflight) return Promise.reject(new Error('已有课表同步正在运行'));
       adapter.authorize(candidate);
-      return resume();
+      return manual ? refresh(binding.selected, true) : resume();
     }
 
-    return { bind, restore, snapshot, refresh, resume };
+    function needsRefresh() {
+      const state = snapshot();
+      return !!state.selected && (!state.entry || now() - state.entry.syncedAt >= freshFor)
+        && now() - lastAttempt >= retryDelay;
+    }
+
+    return { bind, restore, snapshot, refresh, resume, needsRefresh, protectAccount };
   }
 
   window.JufeSync = { create };

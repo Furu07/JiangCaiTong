@@ -48,7 +48,7 @@ assert.throws(() => parse([{ ...blocks[0], text: blocks[0].text.replace('1-15', 
 assert.throws(() => parse([{ ...blocks[0], weekday: '未知日期' }]), isFormatError);
 assert.throws(() => parse([{ ...blocks[0], text: blocks[0].text + '\n调整标记' }]), isFormatError);
 assert.throws(() => parse([{ ...blocks[0], text: blocks[0].text.replace('[3-4]', '[4-3]') }]), isFormatError);
-assert.equal(adapter.schoolTransport, null);
+assert.equal(adapter.portalTermLabel('252'), '2025-2026学年第二学期');
 
 const reader = fs.readFileSync(path.join(__dirname, '../web/jufe-portal-reader.js'), 'utf8');
 const origin = 'https://jwxt.jxufe.edu.cn';
@@ -63,24 +63,38 @@ const dayCells = days.map(weekday => {
   return { colSpan: 1, rowSpan: 1, childNodes };
 });
 const grid = { rows: [header, { cells: [{}, ...dayCells] }] };
-const termControl = { selectedIndex: 0, options: [{ textContent: termLabel }] };
-const form = { querySelector: selector => selector === '#divTitle' ? { textContent: '\n个人课表 ' } : termControl };
+const termControl = { selectedIndex: 0, options: [{ textContent: termLabel, value: '2026-0' }] };
+const query = elements => selector => elements[selector] || null;
+const fields = values => Object.fromEntries(Object.entries(values).map(([key, value]) =>
+  ['input[type=hidden][name=' + key + ']', { value }]));
+const form = { querySelector: query({
+  '#divTitle': { textContent: '\n个人课表 ' }, 'select#xnxq': termControl,
+  ...fields({ xn: '2026', xq: '0', xh: '10000001' })
+}) };
 const doc = (child, element) => ({
   location: { origin }, readyState: 'complete', querySelectorAll: () => child ? [{ contentDocument: child }] : [],
   querySelector: selector => element[selector] || null
 });
-const gridDoc = doc(null, { 'table#mytable': grid });
+const gridFields = fields({ xn: '2026', xq_m: '0', xh: '10000001' });
+const gridDoc = doc(null, { 'table#mytable': grid, ...gridFields });
+grid.ownerDocument = gridDoc;
 const formDoc = doc(gridDoc, { 'form#ActionForm': form });
 const run = (document, pageOrigin = origin) => {
   const sandbox = vm.createContext({ document, location: { origin: pageOrigin } });
   vm.runInContext("String.prototype.trim = () => { throw new Error('portal override'); };", sandbox);
-  return vm.runInContext(reader, sandbox);
+  return vm.runInContext(reader + '("",false)', sandbox);
 };
 const projection = run(doc(formDoc, {}));
 assert.equal(projection.termLabel, termLabel);
 assert.equal(parse(projection.blocks, projection.termLabel).courses.length, 2);
 assert.equal(run(doc(null, {})).status, 'page');
 assert.equal(run(formDoc, 'https://ssl.jxufe.edu.cn').status, 'origin');
+gridFields['input[type=hidden][name=xq_m]'].value = '1';
+assert.equal(run(formDoc).status, 'waiting');
+gridFields['input[type=hidden][name=xq_m]'].value = '0';
+gridFields['input[type=hidden][name=xh]'].value = '10000002';
+assert.equal(run(formDoc).status, 'owner');
+gridFields['input[type=hidden][name=xh]'].value = '10000001';
 dayCells[0].rowSpan = 2;
 assert.equal(run(formDoc).status, 'layout');
 console.log('PASS JUFE reader scope, safe whitespace, calendar binding, grid decoding, and unverified input rejection');

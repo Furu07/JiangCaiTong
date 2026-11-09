@@ -298,6 +298,30 @@ public final class NativeBridge {
     }
 
     @JavascriptInterface
+    public boolean supportsAcademicSync() {
+        return android.os.Build.VERSION.SDK_INT >= 28;
+    }
+
+    @JavascriptInterface
+    public boolean academicOnline() {
+        android.net.ConnectivityManager manager =
+                web.getContext().getSystemService(android.net.ConnectivityManager.class);
+        if (manager == null) return false;
+        android.net.Network network = manager.getActiveNetwork();
+        android.net.NetworkCapabilities capabilities = network == null ? null : manager.getNetworkCapabilities(network);
+        return capabilities != null && capabilities.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED);
+    }
+
+    @JavascriptInterface
+    public boolean openAcademicSync(String term, boolean interactive) {
+        if (closed || android.os.Build.VERSION.SDK_INT < 28 || term == null
+                || (!term.isEmpty() && !term.matches("20\\d{2}-20\\d{2}学年第[一二]学期"))) return false;
+        return web.post(() -> {
+            if (!closed) ((MainActivity) web.getContext()).openAcademicSync(term, interactive);
+        });
+    }
+
+    @JavascriptInterface
     public void openAcademicPortal() {
         web.post(() -> {
             if (closed) return;

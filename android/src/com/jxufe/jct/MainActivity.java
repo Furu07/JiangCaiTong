@@ -31,6 +31,12 @@ public class MainActivity extends Activity {
         }
         startActivityForResult(new Intent(this, AcademicActivity.class), ACADEMIC_VISIT);
     }
+
+    void openAcademicSync(String term, boolean interactive) {
+        startActivityForResult(new Intent(this, AcademicActivity.class)
+                .putExtra("automatic", true).putExtra("interactive", interactive).putExtra("term", term),
+                ACADEMIC_VISIT);
+    }
     private static final String ORIGIN = "https://app.local";
     private WebView web;
     private NativeBridge bridge;
@@ -50,7 +56,7 @@ public class MainActivity extends Activity {
         settings.setAllowContentAccess(false);
         settings.setSaveFormData(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-        settings.setUserAgentString(settings.getUserAgentString() + " JiangCaiTong/0.5.7");
+        settings.setUserAgentString(settings.getUserAgentString() + " JiangCaiTong/0.5.8");
         bridge = new NativeBridge(web);
         web.addJavascriptInterface(bridge, "Android");
         web.setWebViewClient(new AssetClient());
@@ -84,9 +90,13 @@ public class MainActivity extends Activity {
         if (request == ACADEMIC_VISIT) {
             String structure = data == null ? "" : data.getStringExtra("structure");
             String grid = data == null ? "" : data.getStringExtra("gridProjection");
+            String capture = data == null ? "" : data.getStringExtra("capture");
+            String syncError = data == null ? "" : data.getStringExtra("syncError");
             if (web != null) web.evaluateJavascript("window.academicPortalReturned && window.academicPortalReturned("
                     + org.json.JSONObject.quote(structure == null ? "" : structure) + ","
-                    + org.json.JSONObject.quote(grid == null ? "" : grid) + ")", null);
+                    + org.json.JSONObject.quote(grid == null ? "" : grid) + ","
+                    + org.json.JSONObject.quote(capture == null ? "" : capture) + ","
+                    + org.json.JSONObject.quote(syncError == null ? "" : syncError) + ")", null);
             return;
         }
         if (request != CHOOSE_TIMETABLE || fileSelection == null) return;

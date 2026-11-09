@@ -246,6 +246,7 @@
           return entry;
         } catch (error) {
           if (!sameContext()) throw new Error('教务会话已切换');
+          if (error.code === 'account-changed') throw error;
           const fallback = read(termId);
           if (!fallback) throw error;
           return { ...fallback, status: 'fallback', error };
