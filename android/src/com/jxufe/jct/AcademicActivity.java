@@ -14,7 +14,7 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
 import android.widget.LinearLayout;
-import android.widget.Toast;
+import android.widget.TextView;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -28,7 +28,7 @@ public final class AcademicActivity extends Activity {
         "星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日", "星期天"
     };
     private static final String STRUCTURE =
-        "(function(){if(location.origin!=='https://jwxt.jxufe.edu.cn')return null;"
+        "(function(){if(location.origin!=='https://jwxt.jxufe.edu.cn')return {status:'origin'};try{"
         + "var labels=" + new JSONArray(java.util.Arrays.asList(LABELS)).toString() + ";"
         + "var origin=location.origin, docs=[document], frames=0, sameOriginFrames=0, tables=[];"
         + "for(var i=0;i<docs.length;i++){"
@@ -45,9 +45,10 @@ public final class AcademicActivity extends Activity {
         + "return h.textContent.trim()===l;});})};});"
         + "candidates.sort(function(a,b){return b.labels.length-a.labels.length;});"
         + "return {tables:tables.length,frames:frames,sameOriginFrames:sameOriginFrames,"
-        + "candidates:candidates.slice(0,8)};})()";
+        + "candidates:candidates.slice(0,8)};}catch(e){return {status:'scan'};}})()";
 
     private WebView web;
+    private TextView diagnosticView;
     private String diagnostic = "";
 
     static boolean isSchool(Uri uri) {
@@ -71,6 +72,9 @@ public final class AcademicActivity extends Activity {
             inspect.setText("检查已打开的本人课表结构（Debug）");
             inspect.setOnClickListener(view -> inspectTimetable());
             layout.addView(inspect);
+            diagnosticView = new TextView(this);
+            diagnosticView.setVisibility(View.GONE);
+            layout.addView(diagnosticView);
         }
 
         web = new WebView(this);
@@ -96,23 +100,33 @@ public final class AcademicActivity extends Activity {
     }
 
     private void inspectTimetable() {
+        diagnostic = "";
         Uri page = Uri.parse(web.getUrl() == null ? "" : web.getUrl());
         if (!isSchool(page) || !ACADEMIC.equals(page.getHost())) {
-            Toast.makeText(this, "请在校方页面完成登录，再打开本人课表", Toast.LENGTH_LONG).show();
+            showDiagnostic("当前不是教务页面。请完成校方登录，再打开本人课表。");
             return;
         }
+        showDiagnostic("正在检查课表结构…");
         web.evaluateJavascript(STRUCTURE, result -> {
             if (isFinishing() || isDestroyed()) return;
             diagnostic = sanitizeStructure(result);
-            Toast.makeText(this, diagnostic.isEmpty() ? "未读取到课表结构"
-                    : "结构摘要已准备好，返回酱菜通查看", Toast.LENGTH_LONG).show();
+            String message = "未读取到课表结构。请等页面加载完成后重试。";
+            if ("{\"status\":\"origin\"}".equals(result)) message = "当前文档与教务入口不同源。";
+            if ("{\"status\":\"scan\"}".equals(result)) message = "当前教务文档的结构检查遇到异常。";
+            showDiagnostic(diagnostic.isEmpty() ? message : "本机脱敏结构 · " + diagnostic);
         });
+    }
+
+    private void showDiagnostic(String message) {
+        diagnosticView.setText(message);
+        diagnosticView.setVisibility(View.VISIBLE);
     }
 
     private static String sanitizeStructure(String result) {
         if (result == null || result.length() > 4096) return "";
         try {
             JSONObject input = new JSONObject(result);
+            if (input.has("status") || !input.has("tables") || !input.has("frames")) return "";
             JSONObject safe = new JSONObject();
             safe.put("tables", Math.max(0, Math.min(50, input.optInt("tables"))));
             int frames = Math.max(0, Math.min(50, input.optInt("frames")));

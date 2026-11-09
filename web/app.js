@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.5.1';
+const APP_VERSION = '0.5.2';
 const $ = id => document.getElementById(id);
 const tabs = Array.from(document.querySelectorAll('[data-tab]'));
 const native = window.Android;

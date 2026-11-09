@@ -50,7 +50,7 @@ public class MainActivity extends Activity {
         settings.setAllowContentAccess(false);
         settings.setSaveFormData(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-        settings.setUserAgentString(settings.getUserAgentString() + " JiangCaiTong/0.5.1");
+        settings.setUserAgentString(settings.getUserAgentString() + " JiangCaiTong/0.5.2");
         bridge = new NativeBridge(web);
         web.addJavascriptInterface(bridge, "Android");
         web.setWebViewClient(new AssetClient());
