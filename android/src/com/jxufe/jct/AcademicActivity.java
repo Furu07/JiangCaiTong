@@ -1,0 +1,153 @@
+package com.jxufe.jct;
+
+import android.annotation.SuppressLint;
+import android.app.Activity;
+import android.content.Intent;
+import android.content.pm.ApplicationInfo;
+import android.net.Uri;
+import android.os.Bundle;
+import android.view.View;
+import android.webkit.CookieManager;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
+import android.widget.Button;
+import android.widget.LinearLayout;
+import android.widget.Toast;
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+/** Official JUFE pages only. No JavascriptInterface and no cookie or credential export. */
+public final class AcademicActivity extends Activity {
+    static final String ENTRY = "https://jwxt.jxufe.edu.cn/jxcjcaslogin";
+    private static final String ACADEMIC = "jwxt.jxufe.edu.cn";
+    private static final String AUTH = "ssl.jxufe.edu.cn";
+    private static final String[] LABELS = {
+        "课程名称", "课程代码", "任课教师", "星期", "节次", "周次", "校区", "教学楼", "教室", "学期"
+    };
+    private static final String STRUCTURE =
+        "(function(){if(location.origin!=='https://jwxt.jxufe.edu.cn')return null;"
+        + "var labels=" + new JSONArray(java.util.Arrays.asList(LABELS)).toString() + ";"
+        + "var tables=Array.from(document.querySelectorAll('table')).slice(0,50);"
+        + "var candidates=tables.map(function(t){var head=Array.from(t.querySelectorAll('th')).slice(0,60);"
+        + "if(t.rows[0])head=head.concat(Array.from(t.rows[0].cells).slice(0,30));"
+        + "return {rows:t.rows.length,labels:labels.filter(function(l){return head.some(function(h){"
+        + "return h.textContent.trim()===l;});})};});"
+        + "return {tables:tables.length,frames:document.querySelectorAll('iframe').length,"
+        + "candidates:candidates.filter(function(c){return c.labels.length;}).slice(0,8)};})()";
+
+    private WebView web;
+    private String diagnostic = "";
+
+    static boolean isSchool(Uri uri) {
+        return "https".equals(uri.getScheme()) && uri.getUserInfo() == null
+                && (uri.getPort() == -1 || uri.getPort() == 443)
+                && (ACADEMIC.equals(uri.getHost()) || AUTH.equals(uri.getHost()));
+    }
+
+    @Override
+    @SuppressLint("SetJavaScriptEnabled")
+    protected void onCreate(Bundle state) {
+        super.onCreate(state);
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        Button close = new Button(this);
+        close.setText("返回酱菜通");
+        close.setOnClickListener(view -> returnToApp());
+        layout.addView(close);
+        if ((getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+            Button inspect = new Button(this);
+            inspect.setText("检查已打开的本人课表结构（Debug）");
+            inspect.setOnClickListener(view -> inspectTimetable());
+            layout.addView(inspect);
+        }
+
+        web = new WebView(this);
+        WebSettings settings = web.getSettings();
+        settings.setJavaScriptEnabled(true);
+        settings.setDomStorageEnabled(true);
+        settings.setAllowFileAccess(false);
+        settings.setAllowContentAccess(false);
+        settings.setSaveFormData(false);
+        settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+        CookieManager.getInstance().setAcceptThirdPartyCookies(web, false);
+        web.setWebViewClient(new SchoolClient());
+        layout.addView(web, new LinearLayout.LayoutParams(-1, 0, 1));
+        setContentView(layout);
+        if (state == null || web.restoreState(state) == null) web.loadUrl(ENTRY);
+    }
+
+    private static final class SchoolClient extends WebViewClient {
+        @Override
+        public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+            return request.isForMainFrame() && !isSchool(request.getUrl());
+        }
+    }
+
+    private void inspectTimetable() {
+        Uri page = Uri.parse(web.getUrl() == null ? "" : web.getUrl());
+        if (!isSchool(page) || !ACADEMIC.equals(page.getHost())) {
+            Toast.makeText(this, "请在校方页面完成登录，再打开本人课表", Toast.LENGTH_LONG).show();
+            return;
+        }
+        web.evaluateJavascript(STRUCTURE, result -> {
+            if (isFinishing() || isDestroyed()) return;
+            diagnostic = sanitizeStructure(result);
+            Toast.makeText(this, diagnostic.isEmpty() ? "未读取到课表结构"
+                    : "结构摘要已准备好，返回酱菜通查看", Toast.LENGTH_LONG).show();
+        });
+    }
+
+    private static String sanitizeStructure(String result) {
+        if (result == null || result.length() > 4096) return "";
+        try {
+            JSONObject input = new JSONObject(result);
+            JSONObject safe = new JSONObject();
+            safe.put("tables", Math.max(0, Math.min(50, input.optInt("tables"))));
+            safe.put("frames", Math.max(0, Math.min(50, input.optInt("frames"))));
+            JSONArray candidates = input.optJSONArray("candidates");
+            JSONArray tables = new JSONArray();
+            for (int i = 0; candidates != null && i < Math.min(8, candidates.length()); i++) {
+                JSONObject row = candidates.optJSONObject(i);
+                if (row == null) continue;
+                JSONArray supplied = row.optJSONArray("labels");
+                JSONArray recognized = new JSONArray();
+                for (String label : LABELS) {
+                    for (int j = 0; supplied != null && j < supplied.length(); j++) {
+                        if (label.equals(supplied.optString(j))) { recognized.put(label); break; }
+                    }
+                }
+                JSONObject table = new JSONObject();
+                table.put("rows", Math.max(0, Math.min(10000, row.optInt("rows"))));
+                table.put("labels", recognized);
+                tables.put(table);
+            }
+            safe.put("candidates", tables);
+            return safe.toString();
+        } catch (org.json.JSONException error) {
+            return "";
+        }
+    }
+
+    private void returnToApp() {
+        setResult(RESULT_OK, new Intent().putExtra("structure", diagnostic));
+        finish();
+    }
+
+    @Override protected void onSaveInstanceState(Bundle state) {
+        super.onSaveInstanceState(state);
+        web.saveState(state);
+    }
+
+    @Override public void onBackPressed() {
+        if (web.canGoBack()) web.goBack();
+        else returnToApp();
+    }
+
+    @Override protected void onDestroy() {
+        setContentView(new View(this));
+        web.destroy();
+        super.onDestroy();
+    }
+}

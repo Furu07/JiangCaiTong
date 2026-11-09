@@ -275,3 +275,5 @@ input { display: block; width: 100%; }
   padding: 8px; border-radius: 8px; color: var(--text); background: var(--card);
   border: 1px solid var(--line-strong); font: inherit;
 }
+
+.diagnostic-rows { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }

@@ -42,14 +42,14 @@
     fields(data.term, termFields);
     const courses = [];
     for (const course of data.courses) {
-      fields(course, ['id', 'name', 'teacher', 'meetings']);
+      fields(course, ['id', 'courseCode', 'name', 'teacher', 'meetings']);
       if (typeof course.id !== 'string' || !course.id.trim()
           || !Array.isArray(course.meetings) || !course.meetings.length) {
         throw new AcademicError('format', '课程标识或上课时段缺失');
       }
       for (const meeting of course.meetings) {
         fields(meeting, meetingFields);
-        courses.push({ ...meeting, courseId: course.id, name: course.name, teacher: meeting.teacher === undefined
+        courses.push({ ...meeting, courseId: course.id, courseCode: course.courseCode, name: course.name, teacher: meeting.teacher === undefined
           ? course.teacher : meeting.teacher });
       }
     }
@@ -103,10 +103,10 @@
     const meetings = Array.from(table.tBodies).filter(body => body.hasAttribute('data-meetings'));
     if (meetings.length !== 1) throw new AcademicError('format', '课表样本缺少唯一的时段区');
     const courses = Array.from(meetings[0].rows, row => {
-      const value = cells(row, ['name', ...meetingFields]);
+      const value = cells(row, ['name', 'courseCode', ...meetingFields]);
       return {
         id: row.dataset.meetingId, courseId: row.dataset.courseId,
-        name: value.name, teacher: value.teacher, location: value.location, campus: value.campus,
+        name: value.name, courseCode: value.courseCode, teacher: value.teacher, location: value.location, campus: value.campus,
         building: value.building, day: integer(value.day), startPeriod: integer(value.startPeriod),
         endPeriod: integer(value.endPeriod), weekText: value.weekText, kind: value.kind, note: value.note
       };
@@ -211,7 +211,7 @@
       async listTerms() {
         const terms = await request(handle => transport.listTerms(handle));
         if (!Array.isArray(terms)) throw new AcademicError('format', '无法读取学期列表');
-        const result = terms.map(Academic.normalizeTerm);
+        const result = terms.map(term => ({ ...Academic.normalizeTerm(term), current: term.current === true }));
         if (new Set(result.map(term => term.termId)).size !== result.length) {
           throw new AcademicError('format', '教务学期标识重复');
         }
@@ -222,7 +222,7 @@
         const response = await request(handle => transport.loadSchedule(handle, termId));
         const schedule = parseSchedule(response, parsers);
         if (schedule.termId !== termId) throw new AcademicError('format', '课表所属学期与所选学期不符');
-        return schedule;
+        return { ...schedule, emptyConfirmed: response.emptyConfirmed === true };
       }
     };
   }
@@ -233,5 +233,5 @@
     'jufe-html': null,
     'jufe-json': null
   });
-  window.JufeAcademicAdapter = { create: createAdapter, parseSchedule, fixtureParsers, schoolParsers };
+  window.JufeAcademicAdapter = { create: createAdapter, parseSchedule, fixtureParsers, schoolParsers, schoolTransport: null };
 })();

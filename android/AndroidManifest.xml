@@ -14,5 +14,7 @@
         </activity>
         <activity android:name=".WebActivity" android:exported="false" android:launchMode="singleTop"
             android:windowSoftInputMode="adjustResize" />
+        <activity android:name=".AcademicActivity" android:exported="false"
+            android:process=":academic" android:windowSoftInputMode="adjustResize" />
     </application>
 </manifest>

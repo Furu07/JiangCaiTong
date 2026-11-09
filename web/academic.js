@@ -107,7 +107,7 @@
         throw new Error('课表课程或时段标识无效');
       }
       const meeting = {
-        id, courseId, name: name.trim(), teacher: optionalText(course.teacher), ...locationOf(course),
+        id, courseId, courseCode: optionalText(course.courseCode), name: name.trim(), teacher: optionalText(course.teacher), ...locationOf(course),
         ...normalizeSlot(course), weekText, weeks: parseTeachingWeeks(weekText, term.totalWeeks),
         kind, note: optionalText(course.note)
       };
@@ -176,7 +176,7 @@
    * @property {function(): Promise<AcademicTerm[]>} listTerms
    * @property {function(string): Promise<object>} loadSchedule
    */
-  function createRepository(adapter, storage) {
+  function createRepository(adapter, storage, now = Date.now) {
     const inflight = new Map();
     const keyFor = (accountKey, termId) => 'jct.academic.v2.' + JSON.stringify([adapter.id, accountKey, termId]);
 
@@ -191,6 +191,10 @@
         // Ignore corrupt or unavailable cache entries.
       }
       return null;
+    }
+
+    function readFor(accountKey, termId) {
+      return accountKey ? readAt(keyFor(accountKey, termId), termId) : null;
     }
 
     function read(termId) {
@@ -224,11 +228,16 @@
       const request = Promise.resolve().then(async () => {
         try {
           if (!sameContext()) throw new Error('教务会话已切换');
-          const schedule = normalizeSchedule(await adapter.loadSchedule(termId));
+          const raw = await adapter.loadSchedule(termId);
+          const schedule = normalizeSchedule(raw);
+          const previous = readAt(key, termId);
+          if (!schedule.courses.length && previous && previous.schedule.courses.length && raw.emptyConfirmed !== true) {
+            throw new Error('未经确认的空课表，已保留原课程');
+          }
           if (schedule.termId !== termId) throw new Error('返回课表的学期与所选学期不符');
           if (!sameContext()) throw new Error('教务会话已切换');
           if (adapter.status().state === 'expired') throw new Error('教务会话已过期');
-          const entry = { schedule, syncedAt: Date.now(), cached: true, status: 'fresh' };
+          const entry = { schedule, syncedAt: now(), cached: true, status: 'fresh' };
           try {
             storage.setItem(key, JSON.stringify({ schedule, syncedAt: entry.syncedAt }));
           } catch (error) {
@@ -246,7 +255,7 @@
       return request;
     }
 
-    return { read, sync };
+    return { read, readFor, sync };
   }
 
   const demoTerms = [

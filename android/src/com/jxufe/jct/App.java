@@ -12,7 +12,11 @@ public class App extends Application {
     public void onCreate() {
         super.onCreate();
         ctx = getApplicationContext();
-        CxNet.restore();
+        if (android.os.Build.VERSION.SDK_INT >= 28 && getProcessName().endsWith(":academic")) {
+            android.webkit.WebView.setDataDirectorySuffix("jufe");
+        } else {
+            CxNet.restore();
+        }
     }
 
     public static Context ctx() {

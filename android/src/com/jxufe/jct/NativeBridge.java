@@ -11,6 +11,7 @@ import android.widget.Toast;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
@@ -33,6 +34,9 @@ public final class NativeBridge {
 
     private final WebView web;
     private final ExecutorService pool = Executors.newSingleThreadExecutor();
+    // Only accessed by the serial request executor. Never persisted or shared with Chaoxing.
+    private String waterAttempt = "";
+    private java.net.CookieManager waterLoginCookies;
     private volatile boolean closed;
     private volatile boolean clearingWebCookies;
 
@@ -41,17 +45,23 @@ public final class NativeBridge {
     }
 
     @JavascriptInterface
-    public void req2(int id, String method, String url, String body, String referer, String headers, String studyScope) {
+    public void req2(int id, String method, String url, String body, String referer, String headers, String studyScope, String attempt) {
         if (closed) return;
         boolean study = isChaoxing(Uri.parse(url));
         java.net.CookieManager studyCookies = study ? CxNet.cookieJar(studyScope) : null;
         pool.execute(() -> {
             JSONObject result;
             try {
+                URL target = new URL(url);
+                java.net.CookieManager waterCookies = waterLoginJar(method, target, attempt);
                 result = study && !CxNet.isCurrent(studyCookies) ? failure(401)
-                        : request(method, new URL(url), body, referer, headers, studyCookies);
+                        : request(method, target, body, referer, headers, studyCookies, waterCookies);
             } catch (Exception e) {
                 result = failure(0);
+                if (debugDiagnosticsEnabled()) {
+                    try { result.put("exception", exceptionKind(e)); }
+                    catch (org.json.JSONException ignored) { }
+                }
             }
             String response = result.toString();
             web.post(() -> {
@@ -60,6 +70,48 @@ public final class NativeBridge {
                 web.evaluateJavascript("window.__nativeDone(" + id + "," + JSONObject.quote(json) + ")", null);
             });
         });
+    }
+
+    @JavascriptInterface
+    public boolean debugDiagnosticsEnabled() {
+        return (web.getContext().getApplicationInfo().flags
+                & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0;
+    }
+
+    @JavascriptInterface
+    public void clearWaterAttempt(String attempt) {
+        if (closed) return;
+        pool.execute(() -> {
+            if (waterAttempt.equals(attempt)) {
+                waterAttempt = "";
+                waterLoginCookies = null;
+            }
+        });
+    }
+
+    private static String exceptionKind(Exception error) {
+        if (error instanceof java.net.SocketTimeoutException) return "Timeout";
+        if (error instanceof javax.net.ssl.SSLException) return "TLS";
+        if (error instanceof SecurityException) return "Policy";
+        if (error instanceof IOException) return "IO";
+        return "Other";
+    }
+
+    private java.net.CookieManager waterLoginJar(String method, URL url, String attempt) {
+        Uri uri = Uri.parse(url.toString());
+        if (!"POST".equals(method) || !isHttps(uri) || !WATER_HOST.equals(uri.getHost())) return null;
+        String path = uri.getPath();
+        if ((WATER_API + "/acc/login/code").equals(path)) {
+            if (attempt == null || !attempt.matches("[A-Za-z0-9]{10}")) throw new SecurityException("Missing SMS attempt");
+            waterAttempt = attempt;
+            waterLoginCookies = new java.net.CookieManager(null, java.net.CookiePolicy.ACCEPT_ORIGINAL_SERVER);
+            return waterLoginCookies;
+        }
+        if ((WATER_API + "/acc/login").equals(path)) {
+            if (waterLoginCookies == null || !waterAttempt.equals(attempt)) throw new SecurityException("SMS attempt changed");
+            return waterLoginCookies;
+        }
+        return null;
     }
 
     private static JSONObject failure(int status) {
@@ -101,8 +153,10 @@ public final class NativeBridge {
     }
 
     private static JSONObject request(String method, URL url, String body, String referer,
-                                      String headers, java.net.CookieManager studyCookies) throws Exception {
+                                      String headers, java.net.CookieManager studyCookies,
+                               java.net.CookieManager waterCookies) throws Exception {
         boolean study = studyCookies != null;
+        java.net.CookieManager cookies = study ? studyCookies : waterCookies;
         String customHeaders = headers;
         for (int redirects = 0; redirects <= 5; redirects++) {
             if (study && !CxNet.isCurrent(studyCookies)) return failure(401);
@@ -119,10 +173,14 @@ public final class NativeBridge {
                     connection.setRequestProperty("Referer", referer);
                 }
                 applyHeaders(connection, customHeaders, study);
-                if (studyCookies != null) {
+                boolean sentCookie = false;
+                if (cookies != null) {
                     for (Map.Entry<String, List<String>> header :
-                            studyCookies.get(url.toURI(), Collections.emptyMap()).entrySet()) {
-                        for (String value : header.getValue()) connection.addRequestProperty(header.getKey(), value);
+                            cookies.get(url.toURI(), Collections.emptyMap()).entrySet()) {
+                        for (String value : header.getValue()) {
+                            connection.addRequestProperty(header.getKey(), value);
+                            if ("Cookie".equalsIgnoreCase(header.getKey()) && !value.isEmpty()) sentCookie = true;
+                        }
                     }
                 }
                 if ("POST".equals(method)) {
@@ -134,7 +192,7 @@ public final class NativeBridge {
                     }
                 }
                 int status = connection.getResponseCode();
-                if (studyCookies != null) studyCookies.put(url.toURI(), connection.getHeaderFields());
+                if (cookies != null) cookies.put(url.toURI(), connection.getHeaderFields());
                 if (study && status >= 300 && status < 400) {
                     String location = connection.getHeaderField("Location");
                     if (location != null && !location.isEmpty()) {
@@ -147,6 +205,10 @@ public final class NativeBridge {
                 }
                 JSONObject result = new JSONObject();
                 result.put("status", status);
+                if (waterCookies != null) {
+                    result.put("sessionSent", sentCookie);
+                    result.put("sessionPresent", !waterCookies.getCookieStore().getCookies().isEmpty());
+                }
                 result.put("body", readAll(status >= 400 ? connection.getErrorStream()
                                                         : connection.getInputStream()));
                 result.put("url", url.toString());
@@ -222,6 +284,13 @@ public final class NativeBridge {
             if (!closed) web.getContext().startActivity(new Intent(web.getContext(), WebActivity.class));
         });
         return true;
+    }
+
+    @JavascriptInterface
+    public void openAcademicBinding() {
+        web.post(() -> {
+            if (!closed) ((MainActivity) web.getContext()).openAcademicBinding();
+        });
     }
 
     @JavascriptInterface

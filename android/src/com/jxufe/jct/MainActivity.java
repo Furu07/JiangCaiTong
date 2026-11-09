@@ -22,6 +22,15 @@ import java.io.IOException;
 
 public class MainActivity extends Activity {
     private static final int CHOOSE_TIMETABLE = 31;
+    private static final int ACADEMIC_VISIT = 32;
+
+    void openAcademicBinding() {
+        if (android.os.Build.VERSION.SDK_INT < 28) {
+            bridge.openAcademicPortal();
+            return;
+        }
+        startActivityForResult(new Intent(this, AcademicActivity.class), ACADEMIC_VISIT);
+    }
     private static final String ORIGIN = "https://app.local";
     private WebView web;
     private NativeBridge bridge;
@@ -41,7 +50,7 @@ public class MainActivity extends Activity {
         settings.setAllowContentAccess(false);
         settings.setSaveFormData(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-        settings.setUserAgentString(settings.getUserAgentString() + " JiangCaiTong/0.4.0");
+        settings.setUserAgentString(settings.getUserAgentString() + " JiangCaiTong/0.5.0");
         bridge = new NativeBridge(web);
         web.addJavascriptInterface(bridge, "Android");
         web.setWebViewClient(new AssetClient());
@@ -72,6 +81,12 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
+        if (request == ACADEMIC_VISIT) {
+            String structure = data == null ? "" : data.getStringExtra("structure");
+            if (web != null) web.evaluateJavascript("window.academicPortalReturned && window.academicPortalReturned("
+                    + org.json.JSONObject.quote(structure == null ? "" : structure) + ")", null);
+            return;
+        }
         if (request != CHOOSE_TIMETABLE || fileSelection == null) return;
         Uri selected = result == RESULT_OK && data != null ? data.getData() : null;
         ValueCallback<Uri[]> callback = fileSelection;
@@ -131,7 +146,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        if (web != null) web.evaluateJavascript("window.refreshSession && window.refreshSession()", null);
+        if (web != null) web.evaluateJavascript("window.refreshSession && window.refreshSession(); window.resumeAcademicSync && window.resumeAcademicSync()", null);
     }
 
     @Override

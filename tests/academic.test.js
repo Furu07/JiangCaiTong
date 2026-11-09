@@ -185,6 +185,61 @@
     restoredImport.remove(first);
     check(restoredImport.read(first) === null && !!restoredImport.read(second), '只移除所选导入学期');
 
+    const syncValues = new Map();
+    const syncStorage = { getItem: key => syncValues.get(key) || null, setItem: (key, value) => syncValues.set(key, value) };
+    let syncClock = 1000;
+    let responses = 0;
+    let modeSync = 'normal';
+    const transport = {
+      listTerms: async () => [{ ...schedule, current: true }, { ...schedule, termId: second, term: '另一个学期' }],
+      async loadSchedule(handle, id) {
+        responses++;
+        if (modeSync === 'network') throw new Error('offline');
+        if (modeSync === 'expired') throw { status: 401 };
+        if (modeSync === 'empty') {
+          const raw = JSON.parse(json.content);
+          raw.courses = [];
+          raw.changes = [];
+          return { format: 'json', content: JSON.stringify(raw) };
+        }
+        return id === first ? json : { format: 'json', content: JSON.stringify(spring) };
+      }
+    };
+    const candidate = { accountKey: 'test-owner', handle: {}, expiresAt: Infinity };
+    const controller = JufeSync.create(JufeAcademicAdapter.create({ transport }), syncStorage, () => syncClock);
+    check((await controller.bind(candidate)).status === 'fresh' && controller.snapshot().state === 'authorized'
+      && controller.snapshot().selected === first && responses === 1, '首次授权自动查询并验证当前学期课表');
+    await controller.resume();
+    check(responses === 1, '启动或返回时未过期缓存不触发重复查询');
+    const reopened = JufeSync.create(JufeAcademicAdapter.create({ transport }), syncStorage, () => syncClock);
+    check(reopened.snapshot().state === 'reauthorize' && reopened.snapshot().entry.schedule.courses.length === 4,
+      '重开先显示缓存，单凭缓存不建立授权');
+    await reopened.restore(candidate);
+    check(responses === 1 && reopened.snapshot().state === 'authorized', '恢复已验证会话时沿用新鲜课表');
+    syncClock += 6 * 60 * 60 * 1000 + 1;
+    const one = reopened.refresh(first);
+    const two = reopened.refresh(first);
+    await one;
+    check(one === two && responses === 2, '过期缓存按需刷新且并发去重');
+    syncClock += 31000;
+    modeSync = 'empty';
+    const emptySync = await reopened.refresh(first, true);
+    check(emptySync.status === 'fallback' && emptySync.schedule.courses.length === 4, '自动同步拒绝未经确认的空响应覆盖');
+    syncClock += 31000;
+    modeSync = 'expired';
+    const expiredSync = await reopened.refresh(first, true);
+    check(expiredSync.status === 'fallback' && reopened.snapshot().state === 'reauthorize', '教务 401 保留原课表并提示重新认证');
+    modeSync = 'normal';
+    await reopened.restore(candidate);
+    syncClock += 31000;
+    await reopened.refresh(second, true);
+    check(reopened.snapshot().selected === second && reopened.snapshot().entry.schedule.courses.length === 0,
+      '学期切换选择独立的有效缓存');
+    modeSync = 'network';
+    await expectFailure(() => reopened.bind({ ...candidate, accountKey: 'another-owner' }), 'request');
+    check(reopened.snapshot().state === 'reauthorize' && reopened.snapshot().selected === second,
+      '新账号未验证成功时未替换旧账号绑定');
+
     result.textContent = tests.join('\n') + '\n' + tests.length + ' checks passed';
     result.dataset.status = 'pass';
   } catch (error) {
