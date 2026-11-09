@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-当前构建为 0.5.2 Debug。教务独立窗口可就地显示同源框架结构摘要。此前已在 MuMu Android 15 上验证 798 会话隔离及学习通真实只读查询。
+当前构建为 0.5.3 Debug。教务独立窗口可就地显示同源框架结构摘要，支持识别 HTML 表格和声明了网格角色的布局，并在检查超时后恢复操作。此前已在 MuMu Android 15 上验证 798 会话隔离及学习通真实只读查询。
 
 | 入口 | 已实现 | 验证范围 |
 | --- | --- | --- |
@@ -21,10 +21,10 @@
 py -3.12 android/build_apk.py
 ```
 
-脚本从 `ANDROID_HOME`、`ANDROID_SDK_ROOT` 或系统默认位置查找 Android SDK，从 `JAVA_HOME` 或 `PATH` 查找 JDK。首次构建会生成独立的本地 Debug 签名密钥。输出为 `android/dist/JiangCaiTong-0.5.2-debug.apk`。安装到已连接且已授权的测试设备可执行以下命令。
+脚本从 `ANDROID_HOME`、`ANDROID_SDK_ROOT` 或系统默认位置查找 Android SDK，从 `JAVA_HOME` 或 `PATH` 查找 JDK。首次构建会生成独立的本地 Debug 签名密钥。输出为 `android/dist/JiangCaiTong-0.5.3-debug.apk`。安装到已连接且已授权的测试设备可执行以下命令。
 
 ```powershell
-adb install -r android/dist/JiangCaiTong-0.5.2-debug.apk
+adb install -r android/dist/JiangCaiTong-0.5.3-debug.apk
 ```
 
 ## 源码

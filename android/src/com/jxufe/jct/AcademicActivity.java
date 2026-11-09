@@ -23,6 +23,7 @@ public final class AcademicActivity extends Activity {
     static final String ENTRY = "https://jwxt.jxufe.edu.cn/jxcjcaslogin";
     private static final String ACADEMIC = "jwxt.jxufe.edu.cn";
     private static final String AUTH = "ssl.jxufe.edu.cn";
+    private static final long STRUCTURE_TIMEOUT_MS = 5000;
     private static final String[] LABELS = {
         "课程名称", "课程代码", "任课教师", "星期", "节次", "周次", "校区", "教学楼", "教室", "学期",
         "星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日", "星期天"
@@ -34,14 +35,15 @@ public final class AcademicActivity extends Activity {
         + "for(var i=0;i<docs.length;i++){"
         + "var children=docs[i].querySelectorAll('iframe,frame');"
         + "for(var j=0;j<children.length && frames<50;j++){frames++;"
-        + "try{var child=children[j].contentWindow;"
-        + "if(child && child.location.origin===origin && child.document.readyState!=='loading'){"
-        + "docs.push(child.document);sameOriginFrames++;}}catch(e){if(e.name!=='SecurityError')throw e;}}"
-        + "var found=docs[i].querySelectorAll('table');"
+        + "var child=children[j].contentDocument;"
+        + "if(child && child.location.origin===origin && child.readyState!=='loading' && !docs.includes(child)){"
+        + "docs.push(child);sameOriginFrames++;}}"
+        + "var found=docs[i].querySelectorAll('table,[role=grid],[role=table]');"
         + "for(var k=0;k<found.length && tables.length<50;k++)tables.push(found[k]);}"
-        + "var candidates=tables.map(function(t){var head=Array.from(t.querySelectorAll('th')).slice(0,60);"
-        + "if(t.rows[0])head=head.concat(Array.from(t.rows[0].cells).slice(0,30));"
-        + "return {rows:t.rows.length,labels:labels.filter(function(l){return head.some(function(h){"
+        + "var candidates=tables.map(function(t){var rows=t.rows||t.querySelectorAll('[role=row]');"
+        + "var head=Array.from(t.querySelectorAll('th,[role=columnheader]')).slice(0,60);"
+        + "if(rows[0])head=head.concat(Array.from(rows[0].cells||rows[0].children).slice(0,30));"
+        + "return {rows:rows.length,labels:labels.filter(function(l){return head.some(function(h){"
         + "return h.textContent.trim()===l;});})};});"
         + "candidates.sort(function(a,b){return b.labels.length-a.labels.length;});"
         + "return {tables:tables.length,frames:frames,sameOriginFrames:sameOriginFrames,"
@@ -49,6 +51,8 @@ public final class AcademicActivity extends Activity {
 
     private WebView web;
     private TextView diagnosticView;
+    private boolean inspecting;
+    private int inspectionId;
     private String diagnostic = "";
 
     static boolean isSchool(Uri uri) {
@@ -100,15 +104,24 @@ public final class AcademicActivity extends Activity {
     }
 
     private void inspectTimetable() {
+        if (inspecting) return;
         diagnostic = "";
         Uri page = Uri.parse(web.getUrl() == null ? "" : web.getUrl());
         if (!isSchool(page) || !ACADEMIC.equals(page.getHost())) {
             showDiagnostic("当前不是教务页面。请完成校方登录，再打开本人课表。");
             return;
         }
+        inspecting = true;
+        int id = ++inspectionId;
         showDiagnostic("正在检查课表结构…");
+        diagnosticView.postDelayed(() -> {
+            if (!inspecting || inspectionId != id || isFinishing() || isDestroyed()) return;
+            inspecting = false;
+            showDiagnostic("课表结构检查超时。当前窗口已保留。");
+        }, STRUCTURE_TIMEOUT_MS);
         web.evaluateJavascript(STRUCTURE, result -> {
-            if (isFinishing() || isDestroyed()) return;
+            if (!inspecting || inspectionId != id || isFinishing() || isDestroyed()) return;
+            inspecting = false;
             diagnostic = sanitizeStructure(result);
             String message = "未读取到课表结构。请等页面加载完成后重试。";
             if ("{\"status\":\"origin\"}".equals(result)) message = "当前文档与教务入口不同源。";
