@@ -45,6 +45,8 @@
           code: Number.isInteger(context.code) && Math.abs(context.code) < 1000000 ? context.code : null,
           kind: failure ? (kinds.includes(failure.kind) ? failure.kind : 'data') : 'success',
           challenge, cookieSent: context.cookieSent === true, cookiePresent: context.cookiePresent === true,
+          setCookiePresent: context.setCookiePresent ?? null,
+          messageField: context.messageField ?? null,
           elapsedMs: Math.round(performance.now() - started),
           exception: exceptions.includes(context.exception) ? context.exception : null
         });
@@ -141,7 +143,10 @@
     if (!Number.isInteger(code)) throw wErr('饮水服务响应缺少有效业务码', 'data');
     if (code === 0) return (js && js.data);
     if (code === -99 && !phase) throw wErr('登录状态过期了，要重新登录一次', 'auth', code);
-    var msg = String((js && js.msg) || '');
+    const messageField = (phase ? ['msg', 'message', 'errorMessage'] : ['msg'])
+      .find(field => typeof js[field] === 'string' && js[field].trim());
+    if (context) context.messageField = messageField;
+    const msg = phase ? (messageField ? js[messageField].trim() : '') : String(js.msg || '');
     // 签名被拒要单独标出来：签名里有个 30 秒的时间桶，**本机时间偏太多**
     // 就会被判「验签失败」—— 这是用户自己能动的那一种（另外一种是平台换盐，
     // 那得我们改）。以前这里只说「可能需要更新 App」，等于什么都没说。
@@ -167,7 +172,9 @@
         if (invalid && !expired) throw wErr('798 返回短信验证码不正确，请核对本次短信', 'otp-invalid', code);
         throw wErr('798 返回短信验证码错误或失效，无法区分原因，请核对本次短信', 'otp-rejected', code);
       }
-      throw wErr('798 拒绝了' + (phase === 'sms' ? '发送验证码' : '本次登录'), 'deny', code);
+      const codeLabel = Math.abs(code) < 1000000 ? '（业务码 ' + code + '）' : '';
+      throw wErr('798 拒绝了' + (phase === 'sms' ? '发送验证码' : '本次登录')
+        + codeLabel + '，原因未能识别', 'deny', code);
     }
     throw wErr(msg || '操作没成功', 'biz', code);
   }
@@ -224,6 +231,7 @@
       context.http = response.status;
       context.cookieSent = response.sessionSent;
       context.cookiePresent = response.sessionPresent;
+      if (typeof response.setCookiePresent === 'boolean') context.setCookiePresent = response.setCookiePresent;
       context.exception = response.exception;
     }
     if (response.status === 202 || response.status === 429) throw wErr('请求太频繁，请稍后再试', 'limit');

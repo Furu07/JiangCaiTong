@@ -152,8 +152,8 @@ public final class NativeBridge {
                 || (WATER_API + "/acc/login").equals(path));
     }
 
-    private static JSONObject request(String method, URL url, String body, String referer,
-                                      String headers, java.net.CookieManager studyCookies,
+    private JSONObject request(String method, URL url, String body, String referer,
+                               String headers, java.net.CookieManager studyCookies,
                                java.net.CookieManager waterCookies) throws Exception {
         boolean study = studyCookies != null;
         java.net.CookieManager cookies = study ? studyCookies : waterCookies;
@@ -208,6 +208,10 @@ public final class NativeBridge {
                 if (waterCookies != null) {
                     result.put("sessionSent", sentCookie);
                     result.put("sessionPresent", !waterCookies.getCookieStore().getCookies().isEmpty());
+                    if (debugDiagnosticsEnabled()) {
+                        result.put("setCookiePresent", connection.getHeaderField("Set-Cookie") != null
+                                || connection.getHeaderField("Set-Cookie2") != null);
+                    }
                 }
                 result.put("body", readAll(status >= 400 ? connection.getErrorStream()
                                                         : connection.getInputStream()));

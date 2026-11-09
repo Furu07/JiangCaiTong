@@ -24,18 +24,28 @@ public final class AcademicActivity extends Activity {
     private static final String ACADEMIC = "jwxt.jxufe.edu.cn";
     private static final String AUTH = "ssl.jxufe.edu.cn";
     private static final String[] LABELS = {
-        "课程名称", "课程代码", "任课教师", "星期", "节次", "周次", "校区", "教学楼", "教室", "学期"
+        "课程名称", "课程代码", "任课教师", "星期", "节次", "周次", "校区", "教学楼", "教室", "学期",
+        "星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日", "星期天"
     };
     private static final String STRUCTURE =
         "(function(){if(location.origin!=='https://jwxt.jxufe.edu.cn')return null;"
         + "var labels=" + new JSONArray(java.util.Arrays.asList(LABELS)).toString() + ";"
-        + "var tables=Array.from(document.querySelectorAll('table')).slice(0,50);"
+        + "var origin=location.origin, docs=[document], frames=0, sameOriginFrames=0, tables=[];"
+        + "for(var i=0;i<docs.length;i++){"
+        + "var children=docs[i].querySelectorAll('iframe,frame');"
+        + "for(var j=0;j<children.length && frames<50;j++){frames++;"
+        + "try{var child=children[j].contentWindow;"
+        + "if(child && child.location.origin===origin && child.document.readyState!=='loading'){"
+        + "docs.push(child.document);sameOriginFrames++;}}catch(e){if(e.name!=='SecurityError')throw e;}}"
+        + "var found=docs[i].querySelectorAll('table');"
+        + "for(var k=0;k<found.length && tables.length<50;k++)tables.push(found[k]);}"
         + "var candidates=tables.map(function(t){var head=Array.from(t.querySelectorAll('th')).slice(0,60);"
         + "if(t.rows[0])head=head.concat(Array.from(t.rows[0].cells).slice(0,30));"
         + "return {rows:t.rows.length,labels:labels.filter(function(l){return head.some(function(h){"
         + "return h.textContent.trim()===l;});})};});"
-        + "return {tables:tables.length,frames:document.querySelectorAll('iframe').length,"
-        + "candidates:candidates.filter(function(c){return c.labels.length;}).slice(0,8)};})()";
+        + "candidates.sort(function(a,b){return b.labels.length-a.labels.length;});"
+        + "return {tables:tables.length,frames:frames,sameOriginFrames:sameOriginFrames,"
+        + "candidates:candidates.slice(0,8)};})()";
 
     private WebView web;
     private String diagnostic = "";
@@ -105,7 +115,9 @@ public final class AcademicActivity extends Activity {
             JSONObject input = new JSONObject(result);
             JSONObject safe = new JSONObject();
             safe.put("tables", Math.max(0, Math.min(50, input.optInt("tables"))));
-            safe.put("frames", Math.max(0, Math.min(50, input.optInt("frames"))));
+            int frames = Math.max(0, Math.min(50, input.optInt("frames")));
+            safe.put("frames", frames);
+            safe.put("sameOriginFrames", Math.max(0, Math.min(frames, input.optInt("sameOriginFrames"))));
             JSONArray candidates = input.optJSONArray("candidates");
             JSONArray tables = new JSONArray();
             for (int i = 0; candidates != null && i < Math.min(8, candidates.length()); i++) {

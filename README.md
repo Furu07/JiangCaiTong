@@ -4,13 +4,13 @@
 
 ## 当前状态
 
-P1D + P2C 已生成 0.5.0 Debug APK，并在 MuMu Android 15 上验证教务独立窗口、798 会话隔离及学习通真实只读查询。
+当前构建为 0.5.1 Debug。此前 0.5.0 已在 MuMu Android 15 上验证教务独立窗口、798 会话隔离及学习通真实只读查询。0.5.1 扩展了教务框架检查和 798 拒绝原因诊断。
 
 | 入口 | 已实现 | 验证范围 |
 | --- | --- | --- |
 | 课表 | 示例课表、学期切换、周视图和日视图、课程详情、单双周、调课与冲突标记、离线缓存、脱敏课表导入 | 支持独立教务窗口与本地结构检查。真实在线同步等待校方授权与课表结构证据 |
 | 学习 | 学习通官方登录窗口、课程列表、按课程查询作业、考试和活动、本机结果缓存 | 现有授权实测课程列表和一门课的作业、考试及活动 |
-| 生活 | 慧生活798手动验证码登录、余额、设备与消费记录分页 | 已修复登录会话关联并添加 Debug 脱敏诊断，真实登录复验待用户操作 |
+| 生活 | 慧生活798手动验证码登录、余额、设备与消费记录分页 | 用户实测短信发送成功，提交返回业务码 `-1`，具体拒绝原因未确认 |
 | 我的 | 服务账号状态、退出、网页缓存清理和应用信息 | Android 运行检查 |
 
 ## 构建
@@ -21,10 +21,10 @@ P1D + P2C 已生成 0.5.0 Debug APK，并在 MuMu Android 15 上验证教务独�
 py -3.12 android/build_apk.py
 ```
 
-脚本从 `ANDROID_HOME`、`ANDROID_SDK_ROOT` 或系统默认位置查找 Android SDK，从 `JAVA_HOME` 或 `PATH` 查找 JDK。首次构建会生成独立的本地 Debug 签名密钥。输出为 `android/dist/JiangCaiTong-0.5.0-debug.apk`。安装到已连接且已授权的测试设备可执行以下命令。
+脚本从 `ANDROID_HOME`、`ANDROID_SDK_ROOT` 或系统默认位置查找 Android SDK，从 `JAVA_HOME` 或 `PATH` 查找 JDK。首次构建会生成独立的本地 Debug 签名密钥。输出为 `android/dist/JiangCaiTong-0.5.1-debug.apk`。安装到已连接且已授权的测试设备可执行以下命令。
 
 ```powershell
-adb install -r android/dist/JiangCaiTong-0.5.0-debug.apk
+adb install -r android/dist/JiangCaiTong-0.5.1-debug.apk
 ```
 
 ## 源码

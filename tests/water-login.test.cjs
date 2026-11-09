@@ -58,8 +58,16 @@ async function main() {
   assert.equal(water.diagnostics().at(-1).code, -1);
   assert.equal(water.diagnostics().at(-1).cookieSent, true);
 
-  reply = { status: 200, body: '{"code":-1,"msg":"短信验证码错误"}' };
+  reply = { status: 200, body: JSON.stringify({ code: -1, data: { token } }), setCookiePresent: false };
+  await assert.rejects(water.login(phone, sms), error =>
+    error.kind === 'deny' && /业务码 -1.*原因未能识别/.test(error.message));
+  assert.equal(water.diagnostics().at(-1).messageField, null);
+  assert.equal(water.diagnostics().at(-1).setCookiePresent, false);
+
+  reply = { status: 200, body: '{"code":-1,"message":"短信验证码错误"}', setCookiePresent: true };
   await failed(water.login(phone, sms), 'otp-invalid');
+  assert.equal(water.diagnostics().at(-1).messageField, 'message');
+  assert.equal(water.diagnostics().at(-1).setCookiePresent, true);
   reply = { status: 400, body: '{"code":-2}' };
   await failed(water.login(phone, sms), 'params');
   reply = { status: 403, body: '{}' };
