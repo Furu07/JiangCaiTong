@@ -9,7 +9,7 @@ const examHeaders = ['序号', '课程', '学分', '类别', '考核方式', '�
   '院系审核状态', '教务处审核状态', '', ''];
 
 function fixture(kind) {
-  const grades = kind === 'grades';
+  const grades = kind === 'grades' || kind === 'grade-terms';
   const frame = { contentDocument: null };
   let clicks = 0;
   const button = { value: '检索', click: () => { clicks++; },
@@ -17,6 +17,7 @@ function fixture(kind) {
   const year = { value: '2026', disabled: !grades };
   const nextYear = { value: '2027' };
   const gradeScope = { checked: false, click() { this.checked = true; } };
+  const historyScope = { checked: false, click() { this.checked = true; } };
   const effectiveGrade = { checked: false, click() { this.checked = true; } };
   const terms = { value: '0', disabled: !grades, dispatchEvent() {},
     options: [{ value: '0', textContent: '第一学期' }, { value: '1', textContent: '第二学期' }] };
@@ -27,6 +28,7 @@ function fixture(kind) {
     'input#xn1[name=xn1]': nextYear,
     'select#xq[name=xq]': terms,
     'input#sjxz3[type=radio][name=sjxzS]': gradeScope,
+    'input#sjxz1[type=radio][name=sjxzS]': historyScope,
     'input#yxcj[type=radio][name=ysyxS]': effectiveGrade,
     'input#btnQry': button,
     'input#btnSubmit': button,
@@ -42,7 +44,7 @@ function fixture(kind) {
   };
   const context = vm.createContext({ document, location: document.location, URLSearchParams, Event });
   const reader = vm.runInContext(script, context);
-  return { read: (term = label) => reader(kind, term, true).status, frame, cycle, terms, gradeScope, effectiveGrade,
+  return { read: (term = label) => reader(kind, term, true).status, frame, cycle, terms, gradeScope, historyScope, effectiveGrade,
     result: (term = label) => reader(kind, term, true),
     clicks: () => clicks };
 }
@@ -104,6 +106,31 @@ test('effective grades map verified report headers and reject a different semest
     credits: '2.5', name: '示例课程', category: '', nature: '必修', assessment: '考查', grade: '优',
     earnedCredits: '2.5', gpa: '4.0', creditPoints: '10.0', note: ''
   }]);
+});
+
+test('effective grade history emits only distinct semester headings from verified nonempty tables', () => {
+  const history = fixture('grade-terms');
+  assert.equal(history.read(''), 'waiting');
+  assert.equal(history.historyScope.checked, true);
+  assert.equal(history.effectiveGrade.checked, true);
+  assert.equal(history.gradeScope.checked, false);
+  const columns = ['序号', '课程/环节', '学分', '类别', '修读性质', '考核方式', '成绩', '获得学分', '绩点', '学分绩点', '备注'];
+  const table = (label, rows = [{}]) => ({
+    previousElementSibling: { tagName: 'TABLE', innerText: '学年学期 ' + label },
+    tHead: { rows: [{ cells: columns.map(textContent => ({ textContent })) }] },
+    tBodies: [{ rows }]
+  });
+  const older = '2024-2025学年第一学期';
+  const recent = '2025-2026学年第二学期';
+  const report = gradeReport('');
+  report.querySelector = key => key === '.title' ? { innerText: '学生成绩表（有效）' } : {};
+  report.querySelectorAll = () => [
+    table(older), table(recent), table(recent), table('实践环节'), table('2025-2026学年第一学期', [])
+  ];
+  history.frame.contentDocument = report;
+  const result = history.result('');
+  assert.equal(result.state, 'ready');
+  assert.deepEqual(JSON.parse(JSON.stringify(result.rows)), [{ label: older }, { label: recent }]);
 });
 
 test('exam no-record result requires all cycles of the requested term', () => {

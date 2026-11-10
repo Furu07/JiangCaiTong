@@ -21,6 +21,13 @@
       earnedCredits: text(row.earnedCredits), gpa: text(row.gpa), creditPoints: text(row.creditPoints), note: text(row.note) };
   }
 
+  function gradeTerm(row) {
+    const label = text(row.label, true);
+    const match = /^(20\d{2})-(20\d{2})学年第[一二]学期$/.exec(label);
+    if (!match || Number(match[2]) !== Number(match[1]) + 1) invalid();
+    return { label };
+  }
+
   function exam(row) {
     const date = text(row.date);
     const start = text(row.start);
@@ -87,7 +94,8 @@
     };
   }
 
-  const api = { grades: (source, now) => create(grade, source, now), exams: (source, now) => create(exam, source, now) };
+  const api = { grades: (source, now) => create(grade, source, now), exams: (source, now) => create(exam, source, now),
+    gradeTerms: source => create(gradeTerm, source) };
   if (typeof module !== 'undefined') module.exports = api;
   else window.AcademicRecords = api;
 }());

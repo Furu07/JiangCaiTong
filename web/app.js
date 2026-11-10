@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.6.3';
+const APP_VERSION = '0.6.4';
 const $ = id => document.getElementById(id);
 const tabs = Array.from(document.querySelectorAll('[data-tab]'));
 const native = window.Android;
@@ -86,6 +86,7 @@ const recordSource = schoolTransport && typeof native.openAcademicRecords === 'f
   ? kind => (account, term) => requestRecordPortal(kind, account, term) : () => undefined;
 const recordAdapters = { grades: AcademicRecords.grades(recordSource('grades')),
   exams: AcademicRecords.exams(recordSource('exams')) };
+const gradeTerms = AcademicRecords.gradeTerms(recordSource('grade-terms'));
 const recordTerms = {};
 let academicPanel = 'timetable';
 let recordRender = 0;
@@ -743,13 +744,9 @@ async function renderAcademicRecords(force = false) {
   const status = $('recordStatus');
   const results = $('recordResults');
   const term = $('recordTerm');
-  const selected = recordTerms[panel] || scope.selected;
+  const isCurrent = () => request === recordRender && academicPanel === panel;
   $('recordTitle').textContent = title;
-  empty(term);
-  scope.terms.forEach(item => term.add(new Option(item.term, item.termId)));
-  if (scope.terms.some(item => item.termId === selected)) term.value = selected;
-  if (!scope.terms.length) term.add(new Option('绑定后显示教务学期', ''));
-  term.disabled = !scope.terms.length;
+  term.labels[0].textContent = grades ? '成绩学期' : '教务学期';
   $('recordPortal').disabled = true;
   $('recordPortal').hidden = scope.state === 'reauthorize' || scope.state === 'unbound';
   $('recordBack').hidden = !['reauthorize', 'unbound'].includes(scope.state);
@@ -770,9 +767,30 @@ async function renderAcademicRecords(force = false) {
     'account-changed': '教务账号已切换，请重新查询。'
   };
   empty(results);
-  status.textContent = adapter.available ? '正在查询…' : messages.unavailable;
-  const data = await adapter.load(scope, term.value, force);
-  if (request !== recordRender || academicPanel !== panel) return;
+  let options = scope.terms;
+  let catalog;
+  if (grades) {
+    term.disabled = true;
+    status.textContent = adapter.available ? '正在读取成绩学期…' : messages.unavailable;
+    catalog = await gradeTerms.load(scope, '', force);
+    if (!isCurrent()) return;
+    if (scope.accountKey !== schoolSync.snapshot().accountKey) {
+      renderAcademicRecords();
+      return;
+    }
+    const labels = (catalog.cached || catalog).rows?.map(row => row.label) || [];
+    options = [...new Set(labels)].sort().reverse().map(label => ({ term: label, termId: label }));
+  }
+  const selected = recordTerms[panel] || (grades ? options[0]?.termId : scope.selected);
+  empty(term);
+  options.forEach(item => term.add(new Option(item.term, item.termId)));
+  if (options.some(item => item.termId === selected)) term.value = selected;
+  if (!options.length) term.add(new Option(grades ? '暂无可选成绩学期' : '绑定后显示教务学期', ''));
+  term.disabled = !options.length;
+  const selectedTerm = term.value;
+  if (!grades || selectedTerm) status.textContent = adapter.available ? '正在查询…' : messages.unavailable;
+  const data = grades && !selectedTerm ? catalog : await adapter.load(scope, selectedTerm, force);
+  if (!isCurrent()) return;
   const current = schoolSync.snapshot();
   if (scope.accountKey !== current.accountKey || (current.state === 'reauthorize'
       && !['expired', 'account-changed'].includes(data.state))) {
@@ -783,10 +801,12 @@ async function renderAcademicRecords(force = false) {
   $('recordPortal').hidden = needsBinding;
   $('recordPortal').disabled = !native || needsBinding;
   $('recordBack').hidden = !needsBinding;
-  $('recordRefresh').disabled = !term.value || needsBinding;
+  $('recordRefresh').disabled = (!grades && !selectedTerm) || needsBinding;
   const displayed = data.cached || data;
-  const gradeCount = grades && displayed.state === 'ready' ? '有效成绩 · ' + displayed.rows.length + ' 条' : '';
-  status.textContent = [messages[data.state], gradeCount, displayed.at ? '更新于 ' + time(displayed.at) : ''].filter(Boolean).join(' ');
+  const gradeCount = grades && displayed.state === 'ready' ? selectedTerm + ' · 有效成绩 ' + displayed.rows.length + ' 条' : '';
+  const catalogError = catalog?.cached ? '成绩学期更新失败 · ' + messages[catalog.state] : '';
+  status.textContent = [catalogError, messages[data.state], gradeCount,
+    displayed.at ? '更新于 ' + time(displayed.at) : ''].filter(Boolean).join(' ');
   if (displayed.state !== 'ready') return;
   const card = node('section', null, 'card pad');
   const rows = displayed.rows.slice();
@@ -845,7 +865,8 @@ function requestRecordPortal(kind, account, termId) {
       const id = ++nextRecordRequest;
       const timer = setTimeout(() => window.academicRecordsReturned(id, '', 'timeout'), 35000);
       recordPending = { id, timer, resolve, reject, termId };
-      if (!native.openAcademicRecords(id, kind, JufeAcademicAdapter.portalTermLabel(termId),
+      const label = kind === 'exams' ? JufeAcademicAdapter.portalTermLabel(termId) : termId;
+      if (!native.openAcademicRecords(id, kind, label,
           JufeAcademicAdapter.portalTermLabel(scope.selected), account)) {
         window.academicRecordsReturned(id, '', 'format');
       }

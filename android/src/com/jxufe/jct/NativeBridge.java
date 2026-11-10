@@ -398,8 +398,7 @@ public final class NativeBridge {
 
     @JavascriptInterface
     public boolean openAcademicRecords(int requestId, String kind, String term, String verificationTerm, String account) {
-        if (closed || android.os.Build.VERSION.SDK_INT < 28 || !("grades".equals(kind) || "exams".equals(kind))
-                || term == null || !term.matches("20\\d{2}-20\\d{2}学年第[一二]学期")
+        if (closed || android.os.Build.VERSION.SDK_INT < 28 || !AcademicSyncService.validRecordQuery(kind, term)
                 || verificationTerm == null || !verificationTerm.matches("20\\d{2}-20\\d{2}学年第[一二]学期")
                 || account == null || !account.matches("[A-Za-z0-9_-]{43}")) return false;
         return web.post(() -> {

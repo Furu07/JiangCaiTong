@@ -37,6 +37,12 @@ public final class AcademicSyncService extends Service {
 
     @Override public IBinder onBind(Intent intent) { return null; }
 
+    static boolean validRecordQuery(String kind, String term) {
+        if ("grade-terms".equals(kind)) return "".equals(term);
+        return ("grades".equals(kind) || "exams".equals(kind))
+                && term != null && term.matches("20\\d{2}-20\\d{2}学年第[一二]学期");
+    }
+
     @Override @SuppressLint("SetJavaScriptEnabled")
     public int onStartCommand(Intent intent, int flags, int startId) {
         ResultReceiver callback = intent == null ? null : intent.getParcelableExtra("receiver");
@@ -60,9 +66,8 @@ public final class AcademicSyncService extends Service {
             complete(null, "format");
             return START_NOT_STICKY;
         }
-        if (kind != null && (!("grades".equals(kind) || "exams".equals(kind)) || account == null
-                || !account.matches("[A-Za-z0-9_-]{43}") || requestedTerm == null
-                || !requestedTerm.matches("20\\d{2}-20\\d{2}学年第[一二]学期"))) {
+        if (kind != null && (!validRecordQuery(kind, requestedTerm)
+                || account == null || !account.matches("[A-Za-z0-9_-]{43}"))) {
             complete(null, "format");
             return START_NOT_STICKY;
         }
@@ -99,7 +104,7 @@ public final class AcademicSyncService extends Service {
             Uri page = Uri.parse(url);
             if (!AcademicActivity.isSchool(page)) return;
             if (AcademicActivity.AUTH.equals(page.getHost())) {
-                if (!retryTimetableEntry()) complete(null, "expired");
+                if (!retryPortalEntry()) complete(null, "expired");
             } else {
                 navigated = false;
                 read(++document, 0);
@@ -134,7 +139,7 @@ public final class AcademicSyncService extends Service {
         if (web == null || document != run) return;
         Uri page = Uri.parse(web.getUrl() == null ? "" : web.getUrl());
         if (!AcademicActivity.isSchool(page) || !AcademicActivity.ACADEMIC.equals(page.getHost())) return;
-        if (attempt >= 12 && retryTimetableEntry()) return;
+        if (attempt >= 12 && retryPortalEntry()) return;
         if (attempt >= (ownerVerified ? 32 : 24)) {
             complete(null, "timeout");
             return;
@@ -181,8 +186,8 @@ public final class AcademicSyncService extends Service {
         });
     }
 
-    private boolean retryTimetableEntry() {
-        if (kind != null || entryFallback) return false;
+    private boolean retryPortalEntry() {
+        if ("exams".equals(kind) || ownerVerified || entryFallback) return false;
         entryFallback = true;
         document++;
         web.loadUrl(AcademicActivity.ENTRY);

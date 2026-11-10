@@ -1,12 +1,13 @@
 /* Runs inside the same isolated school WebView after its owner was verified. */
 (function readJufeRecord(kind, requestedTerm, navigate) {
   const origin = 'https://jwxt.jxufe.edu.cn';
-  const grades = kind === 'grades';
+  const history = kind === 'grade-terms';
+  const grades = kind === 'grades' || history;
   if (location.origin !== origin || (!grades && kind !== 'exams')) return { status: 'format' };
   const clean = value => (value || '').replace(/^\s+|\s+$/g, '');
   const match = /^(20\d{2})-(20\d{2})学年第([一二])学期$/.exec(requestedTerm);
-  if (!match) return { status: 'term' };
-  const [, year, nextYear, part] = match;
+  if (history ? requestedTerm !== '' : !match) return { status: 'term' };
+  const [, year, nextYear, part] = match || [];
   const semester = part === '一' ? '0' : '1';
   const menu = grades ? '学业成绩' : '课程考试';
   const page = grades ? '/student/xscj.stuckcj.jsp' : '/student/ksap.sqhk.html';
@@ -36,7 +37,8 @@
   const xn = form?.querySelector('input#xn[name=xn]');
   const xn1 = form?.querySelector('input#xn1[name=xn1]');
   const xq = form?.querySelector('select#xq[name=xq]');
-  const gradeScope = grades ? form?.querySelector('input#sjxz3[type=radio][name=sjxzS]') : null;
+  const gradeScope = grades ? form?.querySelector(history
+    ? 'input#sjxz1[type=radio][name=sjxzS]' : 'input#sjxz3[type=radio][name=sjxzS]') : null;
   const effectiveGrade = grades ? form?.querySelector('input#yxcj[type=radio][name=ysyxS]') : null;
   const button = form?.querySelector(grades ? 'input#btnQry' : 'input#btnSubmit');
   const handler = grades ? /\bDoSubmit\s*\(/ : /\bQryData\s*\(/;
@@ -50,25 +52,27 @@
   if (!run) {
     if (effectiveGrade && !effectiveGrade.checked) effectiveGrade.click();
     if (gradeScope && !gradeScope.checked) gradeScope.click();
-    if (xn.value !== year) {
+    if (!history && xn.value !== year) {
       if (xn.disabled || !/^20\d{2}$/.test(xn.value)) return { status: 'term' };
       const direction = Number(year) - Number(xn.value);
       const step = form.querySelector(direction > 0 ? '#btnsmartup' : '#btnsmartdown');
       if (!step || step.disabled || Math.abs(direction) > 6) return { status: 'term' };
       for (let i = 0; i < Math.abs(direction); i++) step.click();
     }
-    if (xn.value !== year || xn1.value !== nextYear) return { status: 'term' };
-    const option = Array.from(xq.options).find(item =>
-      item.value === semester && clean(item.textContent) === '第' + part + '学期');
-    if (!option || (xq.disabled && xq.value !== semester)) return { status: 'term' };
-    if (xq.value !== semester) {
-      xq.value = semester;
-      xq.dispatchEvent(new Event('change', { bubbles: true }));
+    if (!history) {
+      if (xn.value !== year || xn1.value !== nextYear) return { status: 'term' };
+      const option = Array.from(xq.options).find(item =>
+        item.value === semester && clean(item.textContent) === '第' + part + '学期');
+      if (!option || (xq.disabled && xq.value !== semester)) return { status: 'term' };
+      if (xq.value !== semester) {
+        xq.value = semester;
+        xq.dispatchEvent(new Event('change', { bubbles: true }));
+      }
     }
     run = doc.__jctRecordRead = { previous: null, submitted: false, cycles: null, index: 0, rows: [] };
   }
   if (grades && (!effectiveGrade.checked || !gradeScope.checked)) return { status: 'format' };
-  if (xn.value !== year || xn1.value !== nextYear || xq.value !== semester) return { status: 'term' };
+  if (!history && (xn.value !== year || xn1.value !== nextYear || xq.value !== semester)) return { status: 'term' };
 
   if (!grades && !run.cycles) {
     const cycle = form.querySelector('select#xxlc[name=xxlc]');
@@ -139,25 +143,39 @@
   function readGrades(report) {
     const title = clean(report.querySelector('.title')?.innerText);
     if (!title.includes('成绩') || !title.includes('有效')) return { status: 'format' };
-    const fields = {
+    const fields = new Map(Object.entries({
       序号: 'sequence', '课程/环节': 'name', 学分: 'credits', 类别: 'category', 修读性质: 'nature',
       考核方式: 'assessment', 成绩: 'grade', 获得学分: 'earnedCredits', 绩点: 'gpa', 学分绩点: 'creditPoints', 备注: 'note'
-    };
+    }));
     const tables = Array.from(report.querySelectorAll('table')).filter(table => table.tHead);
+    const columns = table => {
+      if (table.tHead.rows.length !== 1) return null;
+      const keys = Array.from(table.tHead.rows[0].cells, cell => fields.get(clean(cell.textContent).replace(/\s+/g, '')));
+      return keys.length === fields.size && keys.every(Boolean) && new Set(keys).size === fields.size ? keys : null;
+    };
+    const termHeading = table => {
+      const heading = table.previousElementSibling;
+      if (heading?.tagName !== 'TABLE') return null;
+      const labels = clean(heading.innerText).replace(/\s+/g, '').match(/20\d{2}-20\d{2}学年第[一二]学期/g);
+      return labels && labels.every(label => label === labels[0]) ? labels[0] : null;
+    };
+    if (history) {
+      const labels = new Set();
+      for (const table of tables) {
+        const label = termHeading(table);
+        if (!label) continue;
+        if (!columns(table)) return { status: 'format' };
+        if (Array.from(table.tBodies).some(body => body.rows.length)) labels.add(label);
+      }
+      if (!labels.size || labels.size > 64) return { status: 'format' };
+      return { status: 'result', state: 'ready', rows: Array.from(labels, label => ({ label })) };
+    }
     if (tables.length !== 1) return { status: 'format' };
     const table = tables[0];
-    const heading = table.previousElementSibling;
-    const terms = clean(heading?.innerText).replace(/\s+/g, '').match(/20\d{2}-20\d{2}学年第[一二]学期/g);
-    if (heading?.tagName !== 'TABLE' || !terms || terms.some(term => term !== requestedTerm)) {
-      return { status: 'format' };
-    }
-    const head = table.tHead.rows;
+    const keys = columns(table);
     const body = table.tBodies[0]?.rows;
-    if (head.length !== 1 || table.tBodies.length !== 1 || !body || !body.length || body.length > 240
+    if (termHeading(table) !== requestedTerm || !keys || table.tBodies.length !== 1 || !body || !body.length || body.length > 240
         || table.rows.length !== 1 + body.length) return { status: 'format' };
-    const keys = Array.from(head[0].cells, cell => fields[clean(cell.textContent).replace(/\s+/g, '')]);
-    if (keys.length !== Object.keys(fields).length || keys.some(key => !key)
-        || new Set(keys).size !== keys.length) return { status: 'format' };
 
     const rows = [];
     for (const row of body) {
