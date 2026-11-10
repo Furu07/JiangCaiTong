@@ -13,13 +13,21 @@
   <script defer src="academic-import.js"></script>
   <script defer src="learning.js"></script>
   <script defer src="water.js"></script>
+  <script defer src="academic-records.js"></script>
+  <script defer src="todo.js"></script>
   <script defer src="app.js"></script>
+  <script defer src="todo-page.js"></script>
 </head>
 <body>
   <div id="app">
     <main class="page" id="page-schedule">
-      <header class="pagehead"><h1>课表</h1><button class="btn" id="scheduleSync">同步示例</button></header>
-      <div class="scroll">
+      <header class="pagehead"><h1>教务</h1><button class="btn" id="scheduleSync">同步示例</button></header>
+      <nav class="segments" aria-label="教务子栏目">
+        <button class="btn" type="button" data-academic="timetable" aria-pressed="true">我的课表</button>
+        <button class="btn" type="button" data-academic="grades" aria-pressed="false">学业成绩</button>
+        <button class="btn" type="button" data-academic="exams" aria-pressed="false">考试安排</button>
+      </nav>
+      <div class="scroll" id="academic-timetable">
         <div class="card pad">
           <label for="term">课表学期</label>
           <select id="term"></select>
@@ -61,6 +69,20 @@
           </details>
         </section>
       </div>
+      <div class="scroll" id="academic-records" hidden>
+        <section class="card pad">
+          <h2 id="recordTitle"></h2>
+          <label for="recordTerm">教务学期</label>
+          <select id="recordTerm"></select>
+          <p class="sub" id="recordStatus" role="status"></p>
+          <div class="controls">
+            <button class="btn" id="recordRefresh" type="button" hidden>刷新</button>
+            <button class="btn" id="recordPortal" type="button">在校方教务查看</button>
+            <button class="btn" id="recordBack" type="button" hidden>前往课表绑定</button>
+          </div>
+        </section>
+        <div id="recordResults"></div>
+      </div>
     </main>
     <main class="page" id="page-study" hidden>
       <header class="pagehead"><h1>学习</h1></header>
@@ -75,6 +97,40 @@
         </div>
         <div id="studyCourses"></div>
         <div id="studyDetails"></div>
+      </div>
+    </main>
+    <main class="page" id="page-todo" hidden>
+      <header class="pagehead"><h1>待办</h1></header>
+      <div class="scroll">
+        <section class="card pad">
+          <form id="todoForm" autocomplete="off">
+            <label for="todoTitle" id="todoTitleLabel">快速添加待办</label>
+            <div class="todo-input">
+              <input id="todoTitle" maxlength="120" required>
+              <button class="btn primary" id="todoSave" type="submit">添加</button>
+            </div>
+            <div id="todoDetails" hidden>
+              <label for="todoNotes">备注</label>
+              <textarea id="todoNotes" rows="3" maxlength="1000"></textarea>
+              <label for="todoDue">截止日期</label>
+              <input id="todoDue" type="date">
+              <div class="controls">
+                <button class="btn" id="todoCancel" type="button">取消编辑</button>
+                <button class="btn" id="todoDelete" type="button">删除</button>
+              </div>
+            </div>
+          </form>
+          <p class="sub" id="todoStatus" role="status"></p>
+        </section>
+        <nav class="segments todo-filters" aria-label="待办筛选">
+          <button class="btn" type="button" data-todo-filter="all" aria-pressed="false">全部</button>
+          <button class="btn" type="button" data-todo-filter="open" aria-pressed="true">未完成</button>
+          <button class="btn" type="button" data-todo-filter="done" aria-pressed="false">已完成</button>
+        </nav>
+        <section class="card pad" aria-label="待办事项">
+          <p class="sub" id="todoCount"></p>
+          <div id="todoList"></div>
+        </section>
       </div>
     </main>
     <main class="page" id="page-life" hidden>
@@ -144,10 +200,11 @@
       </div>
     </main>
     <nav class="tabbar" aria-label="底部导航">
-      <button class="tab active" data-tab="schedule" aria-current="page">课表</button>
-      <button class="tab" data-tab="study">学习</button>
-      <button class="tab" data-tab="life">生活</button>
-      <button class="tab" data-tab="me">我的</button>
+      <button class="tab active" data-tab="schedule" aria-current="page"><svg aria-hidden="true" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4m10-4v4M3 10h18"/></svg>教务</button>
+      <button class="tab" data-tab="study"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 6C9 4 5 4 3 5v15c3-1 6-1 9 1 3-2 6-2 9-1V5c-2-1-6-1-9 1zm0 0v15"/></svg>学习</button>
+      <button class="tab" data-tab="todo"><svg aria-hidden="true" viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="m8 12 3 3 5-6"/></svg>待办</button>
+      <button class="tab" data-tab="life"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3c3 4 7 8 7 12a7 7 0 0 1-14 0c0-4 4-8 7-12z"/></svg>生活</button>
+      <button class="tab" data-tab="me"><svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 7 0 0 1 16 0"/></svg>我的</button>
     </nav>
     <div class="sheet-mask" id="sheetMask" hidden>
       <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="detailTitle">

@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.5.11';
+const APP_VERSION = '0.6.3';
 const $ = id => document.getElementById(id);
 const tabs = Array.from(document.querySelectorAll('[data-tab]'));
 const native = window.Android;
@@ -60,6 +60,9 @@ function closeDetails() {
 window.closeDetails = closeDetails;
 
 let portalPending = null;
+let recordPending = null;
+let nextRecordRequest = 0;
+let schoolReads = Promise.resolve();
 let schoolAuthorizing = false;
 let schoolVerificationFailed = false;
 const schoolTransport = native && native.supportsAcademicSync && native.supportsAcademicSync() ? {
@@ -79,6 +82,13 @@ const schoolPrefix = 'jufe/';
 const scheduleRepo = Academic.createRepository(Academic.mockAdapter, window.localStorage);
 const importedSchedules = AcademicImport.createStore(window.localStorage);
 const importedPrefix = 'import/';
+const recordSource = schoolTransport && typeof native.openAcademicRecords === 'function'
+  ? kind => (account, term) => requestRecordPortal(kind, account, term) : () => undefined;
+const recordAdapters = { grades: AcademicRecords.grades(recordSource('grades')),
+  exams: AcademicRecords.exams(recordSource('exams')) };
+const recordTerms = {};
+let academicPanel = 'timetable';
+let recordRender = 0;
 let demoTerms = [];
 let snapshot = null;
 let week = 1;
@@ -708,9 +718,163 @@ function showSchoolStatus() {
     : state.state === 'reauthorize' ? '教务会话已失效，已保留本机课表。请主动重新绑定。'
     : state.state === 'unverified' ? '已显示本机课表，需要刷新时会核验教务会话。'
     : '请绑定教务，完成校方认证后同步本人课表。';
+  if (academicPanel !== 'timetable') renderAcademicRecords();
 }
 
+function selectAcademicPanel(panel) {
+  academicPanel = panel;
+  const timetable = panel === 'timetable';
+  document.querySelectorAll('[data-academic]').forEach(button => {
+    button.setAttribute('aria-pressed', button.dataset.academic === panel ? 'true' : 'false');
+  });
+  $('academic-timetable').hidden = !timetable;
+  $('scheduleSync').hidden = !timetable;
+  $('academic-records').hidden = timetable;
+  if (!timetable) renderAcademicRecords();
+}
+
+async function renderAcademicRecords(force = false) {
+  const request = ++recordRender;
+  const panel = academicPanel;
+  const grades = panel === 'grades';
+  const title = grades ? '学业成绩' : '考试安排';
+  const scope = schoolSync.snapshot();
+  const adapter = recordAdapters[panel];
+  const status = $('recordStatus');
+  const results = $('recordResults');
+  const term = $('recordTerm');
+  const selected = recordTerms[panel] || scope.selected;
+  $('recordTitle').textContent = title;
+  empty(term);
+  scope.terms.forEach(item => term.add(new Option(item.term, item.termId)));
+  if (scope.terms.some(item => item.termId === selected)) term.value = selected;
+  if (!scope.terms.length) term.add(new Option('绑定后显示教务学期', ''));
+  term.disabled = !scope.terms.length;
+  $('recordPortal').disabled = true;
+  $('recordPortal').hidden = scope.state === 'reauthorize' || scope.state === 'unbound';
+  $('recordBack').hidden = !['reauthorize', 'unbound'].includes(scope.state);
+  $('recordRefresh').hidden = !adapter.available;
+  $('recordRefresh').disabled = true;
+  const messages = {
+    unavailable: '校方数据格式尚未核实，可在校方教务查看。',
+    'needs-auth': '请先在课表页完成教务授权。',
+    expired: '教务会话已失效，请主动重新绑定。',
+    empty: grades ? '暂无成绩。' : '暂无考试安排。',
+    unpublished: grades ? '本学期成绩尚未发布。' : '本学期考试安排尚未公布。',
+    network: '网络查询失败，请稍后重试。',
+    timeout: '教务查询超时，请稍后刷新。',
+    denied: '校方拒绝了本次查询。',
+    busy: '教务窗口正在使用，请稍后刷新。',
+    term: '校方页面未开放查询所选学期。',
+    format: '无法识别教务数据格式。',
+    'account-changed': '教务账号已切换，请重新查询。'
+  };
+  empty(results);
+  status.textContent = adapter.available ? '正在查询…' : messages.unavailable;
+  const data = await adapter.load(scope, term.value, force);
+  if (request !== recordRender || academicPanel !== panel) return;
+  const current = schoolSync.snapshot();
+  if (scope.accountKey !== current.accountKey || (current.state === 'reauthorize'
+      && !['expired', 'account-changed'].includes(data.state))) {
+    renderAcademicRecords();
+    return;
+  }
+  const needsBinding = ['unbound', 'reauthorize'].includes(current.state);
+  $('recordPortal').hidden = needsBinding;
+  $('recordPortal').disabled = !native || needsBinding;
+  $('recordBack').hidden = !needsBinding;
+  $('recordRefresh').disabled = !term.value || needsBinding;
+  const displayed = data.cached || data;
+  const gradeCount = grades && displayed.state === 'ready' ? '有效成绩 · ' + displayed.rows.length + ' 条' : '';
+  status.textContent = [messages[data.state], gradeCount, displayed.at ? '更新于 ' + time(displayed.at) : ''].filter(Boolean).join(' ');
+  if (displayed.state !== 'ready') return;
+  const card = node('section', null, 'card pad');
+  const rows = displayed.rows.slice();
+  const today = new Date().toLocaleDateString('sv-SE');
+  const upcoming = item => !!item.date && item.date >= today;
+  if (!grades) rows.sort((a, b) => Number(upcoming(b)) - Number(upcoming(a))
+    || (a.date || '9999').localeCompare(b.date || '9999') || a.start.localeCompare(b.start));
+  let previousDate;
+  rows.forEach(item => {
+    if (!grades && item.date !== previousDate) {
+      card.appendChild(node('h2', upcoming(item) ? '即将考试 · ' + item.date : item.date || '日期待定'));
+      previousDate = item.date;
+    }
+    const row = node('article', null, 'result-row');
+    row.appendChild(node('strong', item.name));
+    const details = grades
+      ? [item.grade ? '成绩 ' + item.grade : '成绩未提供', item.credits && '学分 ' + item.credits,
+        item.earnedCredits && '获得学分 ' + item.earnedCredits, item.gpa && '绩点 ' + item.gpa,
+        item.creditPoints && '学分绩点 ' + item.creditPoints, item.category, item.nature, item.assessment, item.note]
+      : [item.timeText || [item.start, item.end].filter(Boolean).join('–'),
+        [item.campus, item.building, item.room].filter(Boolean).join(' · '), item.seat && '座位 ' + item.seat, item.mode, item.status];
+    row.appendChild(node('p', details.filter(Boolean).join(' · '), 'sub'));
+    card.appendChild(row);
+  });
+  results.appendChild(card);
+}
+
+document.querySelectorAll('[data-academic]').forEach(button => {
+  button.addEventListener('click', () => selectAcademicPanel(button.dataset.academic));
+});
+$('recordTerm').addEventListener('change', event => {
+  recordTerms[academicPanel] = event.target.value;
+  renderAcademicRecords();
+});
+$('recordRefresh').addEventListener('click', () => renderAcademicRecords(true));
+$('recordBack').addEventListener('click', () => {
+  selectAcademicPanel('timetable');
+  $('academicBind').focus();
+  $('academicBind').scrollIntoView({ block: 'nearest' });
+});
+$('recordPortal').addEventListener('click', () => { if (native) native.openAcademicBinding(); });
+
+function queueSchoolRead(action) {
+  const job = schoolReads.then(action);
+  schoolReads = job.catch(() => {});
+  return job;
+}
+
+function requestRecordPortal(kind, account, termId) {
+  return queueSchoolRead(() => {
+    const scope = schoolSync.snapshot();
+    if (scope.accountKey !== account) throw { code: 'account-changed' };
+    if (scope.state === 'reauthorize') throw { code: 'expired' };
+    if (!navigator.onLine || !native.academicOnline()) throw { code: 'network' };
+    return new Promise((resolve, reject) => {
+      const id = ++nextRecordRequest;
+      const timer = setTimeout(() => window.academicRecordsReturned(id, '', 'timeout'), 35000);
+      recordPending = { id, timer, resolve, reject, termId };
+      if (!native.openAcademicRecords(id, kind, JufeAcademicAdapter.portalTermLabel(termId),
+          JufeAcademicAdapter.portalTermLabel(scope.selected), account)) {
+        window.academicRecordsReturned(id, '', 'format');
+      }
+    });
+  });
+}
+
+window.academicRecordsReturned = function (id, capture, error) {
+  const pending = recordPending;
+  if (!pending || id !== pending.id) return;
+  recordPending = null;
+  clearTimeout(pending.timer);
+  if (error) {
+    pending.reject({ code: error === 'request' ? 'network' : error });
+    if (error === 'expired' || error === 'account-changed') schoolSync.requireReauthorization();
+    return;
+  }
+  try {
+    pending.resolve({ ...JSON.parse(capture), termId: pending.termId });
+  } catch (_) {
+    pending.reject({ code: 'format' });
+  }
+};
+
 function requestSchoolPortal(termId, interactive) {
+  return queueSchoolRead(() => readSchoolPortal(termId, interactive));
+}
+
+function readSchoolPortal(termId, interactive) {
   if (!navigator.onLine || !native.academicOnline()) return Promise.reject(new Error('当前离线，已保留本机课表'));
   if (portalPending) return Promise.reject(new Error('已有教务窗口正在读取'));
   const label = JufeAcademicAdapter.portalTermLabel(termId);
@@ -770,6 +934,7 @@ async function receiveSchoolAuthorization(restore, manual = false) {
       renderTermOptions(selected ? schoolPrefix + selected : '');
     }
     $('academicBindingState').textContent = error.message;
+    if (academicPanel !== 'timetable') renderAcademicRecords();
   } finally {
     schoolAuthorizing = false;
     $('academicBind').disabled = false;
@@ -855,6 +1020,7 @@ async function refreshSchool(termId, manual) {
   } catch (error) {
     if (error.code === 'account-changed') renderTermOptions('');
     $('academicBindingState').textContent = error.message;
+    if (academicPanel !== 'timetable') renderAcademicRecords();
   } finally {
     $('term').disabled = false;
     $('scheduleSync').disabled = false;

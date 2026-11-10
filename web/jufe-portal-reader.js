@@ -1,5 +1,5 @@
 /* Evaluated by the isolated academic WebView, never loaded by the app page. */
-(function (requestedTerm, navigate) {
+(function (requestedTerm, navigate, ownerOnly) {
   const origin = 'https://jwxt.jxufe.edu.cn';
   if (location.origin !== origin) return { status: 'origin' };
   const clean = text => text.replace(/^\s+|\s+$/g, '');
@@ -29,6 +29,8 @@
       term.dispatchEvent(new Event('change', { bubbles: true }));
       return { status: 'waiting' };
     }
+    const owner = field(form, 'xh');
+    if (ownerOnly) return /^\d{5,20}$/.test(owner) ? { owner } : { status: 'owner' };
     const grids = children.map(child => child.querySelector('table#mytable')).filter(Boolean);
     if (grids.length !== 1) return { status: 'grid' };
     const grid = grids[0];
@@ -37,7 +39,6 @@
     const part = field(form, 'xq');
     if (!/^20\d{2}$/.test(year) || !/^[01]$/.test(part) || option.value !== year + '-' + part
         || field(gridDoc, 'xn') !== year || field(gridDoc, 'xq_m') !== part) return { status: 'waiting' };
-    const owner = field(form, 'xh');
     if (!/^\d{5,20}$/.test(owner) || field(gridDoc, 'xh') !== owner) return { status: 'owner' };
     if (grid.rows.length < 2 || grid.rows.length > 40 || grid.rows[0].cells.length !== 8
         || weekdays.some((day, index) => clean(grid.rows[0].cells[index + 1].textContent) !== day)) {

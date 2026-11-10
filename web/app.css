@@ -216,6 +216,31 @@ body { background-image: var(--bg-grad); background-repeat: no-repeat;
 .scroll { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 2px 14px 16px; }
 .tabbar { position: relative; flex: 0 0 var(--tab-h); }
 .tab { min-width: 0; font-size: 14px; }
+.tab svg {
+  width: 19px; height: 19px; fill: none; stroke: currentColor;
+  stroke-width: 1.65; stroke-linecap: round; stroke-linejoin: round;
+}
+.segments {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px;
+  flex: none; padding: 0 14px 9px;
+}
+.segments .btn { padding: 0 2px; font-size: 14px; }
+.todo-filters { padding: 0 0 9px; }
+.todo-input { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.todo-row {
+  display: grid; grid-template-columns: 44px minmax(0, 1fr);
+  align-items: start; border-top: 1px solid var(--line);
+}
+.todo-row input { width: 100%; height: 44px; margin: 0; accent-color: var(--accent); }
+.todo-content {
+  display: block; min-height: 44px; padding: 10px 6px; text-align: left;
+  color: var(--text); background: none; border: 0;
+  overflow-wrap: anywhere; white-space: pre-wrap;
+}
+.todo-content small { display: block; margin-top: 3px; color: var(--sub); }
+.todo-row.completed .todo-content { color: var(--sub); }
+.todo-row.completed .todo-content span { text-decoration: line-through; }
+#todoStatus:empty { display: none; }
 .btn { min-height: 44px; }
 .btn[aria-pressed="true"], .course-list-item[aria-pressed="true"] {
   background: var(--accent-soft); color: var(--text); box-shadow: inset 0 0 0 1px var(--accent);

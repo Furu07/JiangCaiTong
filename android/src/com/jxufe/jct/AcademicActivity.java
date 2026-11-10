@@ -144,7 +144,11 @@ public final class AcademicActivity extends Activity {
     }
 
     static String loadReader(Context context) throws IOException {
-        try (InputStream input = context.getAssets().open("web/jufe-portal-reader.js");
+        return loadReader(context, "jufe-portal-reader.js");
+    }
+
+    static String loadReader(Context context, String file) throws IOException {
+        try (InputStream input = context.getAssets().open("web/" + file);
              ByteArrayOutputStream bytes = new ByteArrayOutputStream()) {
             byte[] buffer = new byte[4096];
             for (int count; (count = input.read(buffer)) != -1;) bytes.write(buffer, 0, count);
@@ -205,7 +209,7 @@ public final class AcademicActivity extends Activity {
                 .put("grid", grid).put("terms", terms).put("current", current).toString();
     }
 
-    private static String accountKey(Context context, String owner) throws Exception {
+    static String accountKey(Context context, String owner) throws Exception {
         android.content.SharedPreferences preferences = context.getSharedPreferences("jufe_scope", MODE_PRIVATE);
         String secret = preferences.getString("key", "");
         if (secret.isEmpty()) {

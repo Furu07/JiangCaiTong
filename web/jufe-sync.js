@@ -35,6 +35,7 @@
       const visible = binding && !binding.suspended
         && (!session.accountKey || session.accountKey === binding.accountKey);
       return {
+        accountKey: visible ? binding.accountKey : '',
         terms: visible ? binding.terms : [],
         selected: visible ? binding.selected : '',
         entry: visible ? repository.readFor(binding.accountKey, binding.selected) : null,

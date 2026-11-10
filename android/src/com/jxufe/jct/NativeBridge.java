@@ -397,6 +397,42 @@ public final class NativeBridge {
     }
 
     @JavascriptInterface
+    public boolean openAcademicRecords(int requestId, String kind, String term, String verificationTerm, String account) {
+        if (closed || android.os.Build.VERSION.SDK_INT < 28 || !("grades".equals(kind) || "exams".equals(kind))
+                || term == null || !term.matches("20\\d{2}-20\\d{2}学年第[一二]学期")
+                || verificationTerm == null || !verificationTerm.matches("20\\d{2}-20\\d{2}学年第[一二]学期")
+                || account == null || !account.matches("[A-Za-z0-9_-]{43}")) return false;
+        return web.post(() -> {
+            if (closed) return;
+            MainActivity activity = (MainActivity) web.getContext();
+            if (activity.hasAcademicVisit()) {
+                academicRecordsResult(requestId, "", "busy");
+                return;
+            }
+            android.os.ResultReceiver receiver = new android.os.ResultReceiver(
+                    new android.os.Handler(android.os.Looper.getMainLooper())) {
+                @Override protected void onReceiveResult(int code, android.os.Bundle data) {
+                    if (!closed) academicRecordsResult(requestId,
+                            data.getString("capture", ""), data.getString("error", ""));
+                }
+            };
+            try {
+                if (activity.startService(new Intent(activity, AcademicSyncService.class).putExtra("kind", kind)
+                        .putExtra("term", verificationTerm).putExtra("recordTerm", term).putExtra("account", account)
+                        .putExtra("receiver", receiver)) == null) academicRecordsResult(requestId, "", "request");
+            } catch (IllegalStateException | SecurityException error) {
+                academicRecordsResult(requestId, "", "request");
+            }
+        });
+    }
+
+    private void academicRecordsResult(int requestId, String capture, String error) {
+        web.evaluateJavascript("window.academicRecordsReturned && window.academicRecordsReturned("
+                + requestId + "," + JSONObject.quote(capture == null ? "" : capture) + ","
+                + JSONObject.quote(error) + ")", null);
+    }
+
+    @JavascriptInterface
     public void openAcademicPortal() {
         web.post(() -> {
             if (closed) return;

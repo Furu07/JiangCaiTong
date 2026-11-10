@@ -20,11 +20,18 @@ import org.json.JSONObject;
 /** A read-only refresh in the isolated academic profile, with no authentication UI. */
 public final class AcademicSyncService extends Service {
     private static final String TAG = "JctAcademic";
+    private static final String PORTAL_HOME = "https://jwxt.jxufe.edu.cn/frame/homes.action";
     private final Handler handler = new Handler(Looper.getMainLooper());
     private WebView web;
     private ResultReceiver receiver;
     private String script;
     private String term;
+    private String kind;
+    private String requestedTerm;
+    private String account;
+    private boolean ownerVerified;
+    private boolean entryFallback;
+    private String recordPhase;
     private int document;
     private boolean navigated;
 
@@ -43,7 +50,19 @@ public final class AcademicSyncService extends Service {
         }
         receiver = callback;
         term = intent.getStringExtra("term");
+        kind = intent.getStringExtra("kind");
+        requestedTerm = intent.getStringExtra("recordTerm");
+        account = intent.getStringExtra("account");
+        ownerVerified = false;
+        entryFallback = false;
+        recordPhase = "";
         if (term == null || !term.matches("20\\d{2}-20\\d{2}学年第[一二]学期")) {
+            complete(null, "format");
+            return START_NOT_STICKY;
+        }
+        if (kind != null && (!("grades".equals(kind) || "exams".equals(kind)) || account == null
+                || !account.matches("[A-Za-z0-9_-]{43}") || requestedTerm == null
+                || !requestedTerm.matches("20\\d{2}-20\\d{2}学年第[一二]学期"))) {
             complete(null, "format");
             return START_NOT_STICKY;
         }
@@ -62,8 +81,8 @@ public final class AcademicSyncService extends Service {
             web.measure(width, height);
             web.layout(0, 0, 1024, 768);
             handler.postDelayed(() -> complete(null, "timeout"), 30000);
-            Log.i(TAG, "background start");
-            web.loadUrl(AcademicActivity.ENTRY);
+            Log.i(TAG, kind == null ? "background start" : "records start " + kind);
+            web.loadUrl(PORTAL_HOME);
         } catch (Exception error) {
             complete(null, "request");
         }
@@ -80,7 +99,7 @@ public final class AcademicSyncService extends Service {
             Uri page = Uri.parse(url);
             if (!AcademicActivity.isSchool(page)) return;
             if (AcademicActivity.AUTH.equals(page.getHost())) {
-                complete(null, "expired");
+                if (!retryTimetableEntry()) complete(null, "expired");
             } else {
                 navigated = false;
                 read(++document, 0);
@@ -89,22 +108,66 @@ public final class AcademicSyncService extends Service {
 
         @Override public void onReceivedError(WebView view, WebResourceRequest request,
                                               android.webkit.WebResourceError error) {
-            if (web == view && request.isForMainFrame()) complete(null, "request");
+            if (web == view && (request.isForMainFrame() || isRecordReport(request.getUrl()))) {
+                complete(null, "request");
+            }
         }
+
+        @Override public void onReceivedHttpError(WebView view, WebResourceRequest request,
+                                                  android.webkit.WebResourceResponse response) {
+            if (web != view || !isRecordReport(request.getUrl())) return;
+            int status = response.getStatusCode();
+            complete(null, status == 401 ? "expired" : status == 403 ? "denied"
+                    : status == 404 ? "format" : "request");
+        }
+    }
+
+    private boolean isRecordReport(Uri url) {
+        if (kind == null || !AcademicActivity.isSchool(url) || !AcademicActivity.ACADEMIC.equals(url.getHost())) {
+            return false;
+        }
+        return "/student/xscj.stuckcj_data10421.jsp".equals(url.getPath())
+                || "/taglib/DataTable.jsp".equals(url.getPath());
     }
 
     private void read(int run, int attempt) {
         if (web == null || document != run) return;
         Uri page = Uri.parse(web.getUrl() == null ? "" : web.getUrl());
         if (!AcademicActivity.isSchool(page) || !AcademicActivity.ACADEMIC.equals(page.getHost())) return;
-        if (attempt >= 24) {
+        if (attempt >= 12 && retryTimetableEntry()) return;
+        if (attempt >= (ownerVerified ? 32 : 24)) {
             complete(null, "timeout");
             return;
         }
-        web.evaluateJavascript(script + "(" + JSONObject.quote(term) + "," + !navigated + ")", result -> {
+        String args = ownerVerified
+                ? JSONObject.quote(kind) + "," + JSONObject.quote(requestedTerm) + "," + !navigated
+                : JSONObject.quote(term) + "," + !navigated + "," + (kind != null);
+        web.evaluateJavascript(script + "(" + args + ")", result -> {
             if (web == null || document != run) return;
             JSONObject response = AcademicActivity.readObject(result);
             if (response != null && "opened".equals(response.optString("status"))) navigated = true;
+            if (ownerVerified) {
+                if (readRecord(response)) return;
+                handler.postDelayed(() -> read(run, attempt + 1), 650);
+                return;
+            }
+            if (kind != null && response != null && response.has("owner")) {
+                try {
+                    verifyOwnerAndOpenRecords(response);
+                } catch (Exception error) {
+                    complete(null, "format");
+                }
+                return;
+            }
+            if (kind != null) {
+                String status = response == null ? "" : response.optString("status");
+                if (!status.equals(recordPhase) && status.matches("opened|page|term|waiting|owner")) {
+                    recordPhase = status;
+                    Log.i(TAG, "records identity " + kind + " " + status);
+                }
+                handler.postDelayed(() -> read(run, attempt + 1), 650);
+                return;
+            }
             String grid = AcademicActivity.sanitizeGridProjection(result);
             if (grid.isEmpty() || response == null) {
                 handler.postDelayed(() -> read(run, attempt + 1), 650);
@@ -116,6 +179,50 @@ public final class AcademicSyncService extends Service {
                 complete(null, "format");
             }
         });
+    }
+
+    private boolean retryTimetableEntry() {
+        if (kind != null || entryFallback) return false;
+        entryFallback = true;
+        document++;
+        web.loadUrl(AcademicActivity.ENTRY);
+        return true;
+    }
+
+    private void verifyOwnerAndOpenRecords(JSONObject response) throws Exception {
+        String owner = response.getString("owner");
+        if (!owner.matches("\\d{5,20}")) throw new IllegalArgumentException();
+        if (!account.equals(AcademicActivity.accountKey(this, owner))) {
+            complete(null, "account-changed");
+            return;
+        }
+        script = AcademicActivity.loadReader(this, "jufe-record-reader.js");
+        ownerVerified = true;
+        document++;
+        Log.i(TAG, "records owner verified " + kind);
+        web.loadUrl(PORTAL_HOME);
+    }
+
+    private boolean readRecord(JSONObject response) {
+        String status = response == null ? "" : response.optString("status");
+        String phase = response == null ? "" : response.optString("phase");
+        if (!phase.equals(recordPhase) && phase.matches("menu|cycles|submitted|report")) {
+            recordPhase = phase;
+            Log.i(TAG, "records phase " + kind + " " + phase);
+        }
+        if ("format".equals(status) || "term".equals(status)) {
+            complete(null, status);
+            return true;
+        }
+        if (!"result".equals(status)) return false;
+        try {
+            JSONObject capture = new JSONObject().put("accountKey", account)
+                    .put("state", response.getString("state")).put("rows", response.getJSONArray("rows"));
+            complete(capture.toString(), "");
+        } catch (Exception error) {
+            complete(null, "format");
+        }
+        return true;
     }
 
     private static void send(ResultReceiver callback, String capture, String error) {
@@ -130,7 +237,8 @@ public final class AcademicSyncService extends Service {
         ResultReceiver callback = receiver;
         receiver = null;
         release();
-        Log.i(TAG, "background result " + (error.isEmpty() ? "success" : error));
+        Log.i(TAG, (kind == null ? "background result " : "records result " + kind + " ")
+                + (error.isEmpty() ? "success" : error));
         stopSelf();
         send(callback, capture, error);
     }
