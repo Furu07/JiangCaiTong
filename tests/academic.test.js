@@ -212,7 +212,7 @@
     await controller.resume();
     check(responses === 1, '启动或返回时未过期缓存不触发重复查询');
     const reopened = JufeSync.create(JufeAcademicAdapter.create({ transport }), syncStorage, () => syncClock);
-    check(reopened.snapshot().state === 'reauthorize' && reopened.snapshot().entry.schedule.courses.length === 4,
+    check(reopened.snapshot().state === 'unverified' && reopened.snapshot().entry.schedule.courses.length === 4,
       '重开先显示缓存，单凭缓存不建立授权');
     await reopened.restore(candidate);
     check(responses === 1 && reopened.snapshot().state === 'authorized', '恢复已验证会话时沿用新鲜课表');
@@ -230,7 +230,7 @@
     const expiredSync = await reopened.refresh(first, true);
     check(expiredSync.status === 'fallback' && reopened.snapshot().state === 'reauthorize', '教务 401 保留原课表并提示重新认证');
     modeSync = 'normal';
-    await reopened.restore(candidate);
+    await reopened.bind(candidate);
     syncClock += 31000;
     await reopened.refresh(second, true);
     check(reopened.snapshot().selected === second && reopened.snapshot().entry.schedule.courses.length === 0,

@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.5.10';
+const APP_VERSION = '0.5.11';
 const $ = id => document.getElementById(id);
 const tabs = Array.from(document.querySelectorAll('[data-tab]'));
 const native = window.Android;
@@ -61,6 +61,7 @@ window.closeDetails = closeDetails;
 
 let portalPending = null;
 let schoolAuthorizing = false;
+let schoolVerificationFailed = false;
 const schoolTransport = native && native.supportsAcademicSync && native.supportsAcademicSync() ? {
   async listTerms(handle) { return handle.terms; },
   async loadSchedule(handle, termId) {
@@ -704,7 +705,8 @@ refreshSession();
 function showSchoolStatus() {
   const state = schoolSync.snapshot();
   $('academicBindingState').textContent = state.state === 'authorized' ? '本人课表授权已验证。'
-    : state.state === 'reauthorize' ? '已显示本机课表，需要刷新时会核验教务会话。'
+    : state.state === 'reauthorize' ? '教务会话已失效，已保留本机课表。请主动重新绑定。'
+    : state.state === 'unverified' ? '已显示本机课表，需要刷新时会核验教务会话。'
     : '请绑定教务，完成校方认证后同步本人课表。';
 }
 
@@ -713,7 +715,7 @@ function requestSchoolPortal(termId, interactive) {
   if (portalPending) return Promise.reject(new Error('已有教务窗口正在读取'));
   const label = JufeAcademicAdapter.portalTermLabel(termId);
   return new Promise((resolve, reject) => {
-    portalPending = { resolve, reject };
+    portalPending = { resolve, reject, interactive };
     if (!native.openAcademicSync(label, interactive)) {
       portalPending = null;
       reject(new Error('无法打开教务窗口'));
@@ -726,9 +728,10 @@ async function receiveSchoolAuthorization(restore, manual = false) {
     showSchoolStatus();
     return;
   }
-  if (schoolAuthorizing || portalPending || (restore && !manual && !schoolSync.needsRefresh())) return;
+  if (schoolAuthorizing || portalPending || (restore && !manual
+      && (schoolVerificationFailed || !schoolSync.needsRefresh()))) return;
   const saved = schoolSync.snapshot();
-  if (restore && !saved.selected) return;
+  if (restore && (saved.state !== 'unverified' || !navigator.onLine || !native.academicOnline())) return;
   schoolAuthorizing = true;
   $('academicBind').disabled = true;
   $('academicBindingState').textContent = restore ? '正在刷新本人课表…' : '请在校方窗口完成认证。';
@@ -748,6 +751,7 @@ async function receiveSchoolAuthorization(restore, manual = false) {
     let entry;
     try {
       entry = await (restore ? schoolSync.restore(candidate, manual) : schoolSync.bind(candidate));
+      schoolVerificationFailed = false;
     } finally {
       candidate.handle.pending = null;
     }
@@ -757,6 +761,10 @@ async function receiveSchoolAuthorization(restore, manual = false) {
     }
     showSchoolStatus();
   } catch (error) {
+    if (restore) {
+      schoolVerificationFailed = true;
+      if (error.code === 'expired') schoolSync.requireReauthorization();
+    }
     if (previousTerm.startsWith(schoolPrefix)) {
       const selected = schoolSync.snapshot().selected;
       renderTermOptions(selected ? schoolPrefix + selected : '');
@@ -768,8 +776,8 @@ async function receiveSchoolAuthorization(restore, manual = false) {
   }
 }
 
-window.academicPortalReturned = function (structure, grid, capture, syncError) {
-  if (portalPending) {
+function completeSchoolPortal(capture, syncError, interactive) {
+  if (portalPending && portalPending.interactive === interactive) {
     const pending = portalPending;
     portalPending = null;
     try {
@@ -783,8 +791,13 @@ window.academicPortalReturned = function (structure, grid, capture, syncError) {
       }
       const data = JSON.parse(capture);
       if (!/^[A-Za-z0-9_-]{43}$/.test(data.accountKey) || !Array.isArray(data.terms)) throw new Error('教务账号校验失败');
-      if (schoolSync.protectAccount(data.accountKey) && $('term').value.startsWith(schoolPrefix)) {
-        renderTermOptions('');
+      if (schoolSync.protectAccount(data.accountKey)) {
+        if ($('term').value.startsWith(schoolPrefix)) renderTermOptions('');
+        if (!interactive) {
+          const error = new Error('教务账号已切换，请主动重新绑定。');
+          error.code = 'account-changed';
+          throw error;
+        }
       }
       const response = { format: 'jufe-portal-grid', content: data.grid };
       const schedule = JufeAcademicAdapter.parseSchedule(response, JufeAcademicAdapter.schoolParsers);
@@ -794,8 +807,15 @@ window.academicPortalReturned = function (structure, grid, capture, syncError) {
       }
       pending.resolve({ accountKey: data.accountKey, terms, schedule, response });
     } catch (error) { pending.reject(error); }
-    return;
+    return true;
   }
+  return false;
+}
+
+window.academicBackgroundReturned = (capture, error) => completeSchoolPortal(capture, error, false);
+
+window.academicPortalReturned = function (structure, grid, capture, syncError) {
+  if (completeSchoolPortal(capture, syncError, true)) return;
   const summary = $('academicStructure');
   summary.hidden = !structure && !grid;
   summary.textContent = structure ? '本机脱敏结构 · ' + structure : '';
@@ -830,7 +850,7 @@ async function refreshSchool(termId, manual) {
       }
     }
     showSchoolStatus();
-    if (schoolSync.snapshot().state === 'reauthorize' && !schoolAuthorizing
+    if (schoolSync.snapshot().state === 'unverified' && !schoolAuthorizing
         && (manual || schoolSync.needsRefresh())) receiveSchoolAuthorization(true, manual);
   } catch (error) {
     if (error.code === 'account-changed') renderTermOptions('');

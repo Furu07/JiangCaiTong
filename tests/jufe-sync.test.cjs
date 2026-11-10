@@ -16,11 +16,13 @@ const storage = { getItem: key => values.get(key) ?? null, setItem: (key, value)
 let online = true;
 let now = 0;
 let reads = 0;
+let expired = false;
 const candidate = name => ({ accountKey: name, handle: { name } });
 const transport = {
   async listTerms() { return [term]; },
   async loadSchedule({ name }) {
     reads++;
+    if (expired) throw { status: 401 };
     if (!online) throw Error('fixture offline');
     const content = {
       schema: 'jct-timetable/1',
@@ -77,7 +79,21 @@ async function main() {
   assert.equal(displayed(reopen()), undefined);
   assert.equal((await controller.restore(a)).status, 'fresh');
   assert.equal(displayed(reopen()), a.accountKey);
-  console.log('PASS JUFE first sync, restart refresh, offline fallback, and persistent account isolation');
+  now += 31000;
+  expired = true;
+  assert.equal((await controller.refresh(term.termId, true)).status, 'fallback');
+  assert.equal(controller.snapshot().state, 'reauthorize');
+  controller = reopen();
+  assert.equal(displayed(controller), a.accountKey);
+  assert.equal(controller.needsRefresh(), false);
+  const before = reads;
+  await assert.rejects(controller.restore(a), /主动重新绑定/);
+  await controller.resume();
+  assert.equal(reads, before);
+  expired = false;
+  assert.equal((await controller.bind(a)).status, 'fresh');
+  assert.equal(controller.snapshot().state, 'authorized');
+  console.log('PASS JUFE refresh, offline fallback, isolation, and expired-session gate');
 }
 
 main().catch(error => { console.error(error); process.exitCode = 1; });

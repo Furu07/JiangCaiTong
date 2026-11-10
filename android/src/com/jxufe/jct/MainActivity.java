@@ -23,20 +23,36 @@ import java.io.IOException;
 public class MainActivity extends Activity {
     private static final int CHOOSE_TIMETABLE = 31;
     private static final int ACADEMIC_VISIT = 32;
+    private boolean academicVisitActive;
+    private boolean academicReturning;
 
     void openAcademicBinding() {
         if (android.os.Build.VERSION.SDK_INT < 28) {
             bridge.openAcademicPortal();
             return;
         }
-        startActivityForResult(new Intent(this, AcademicActivity.class), ACADEMIC_VISIT);
+        startAcademicVisit(new Intent(this, AcademicActivity.class));
     }
 
-    void openAcademicSync(String term, boolean interactive) {
-        startActivityForResult(new Intent(this, AcademicActivity.class)
-                .putExtra("automatic", true).putExtra("interactive", interactive).putExtra("term", term),
-                ACADEMIC_VISIT);
+    boolean openAcademicSync(String term) {
+        return startAcademicVisit(new Intent(this, AcademicActivity.class)
+                .putExtra("automatic", true).putExtra("term", term));
     }
+
+    private boolean startAcademicVisit(Intent intent) {
+        if (academicVisitActive || isFinishing() || isDestroyed()) return false;
+        academicVisitActive = true;
+        try {
+            android.util.Log.i("JctAcademic", "interactive start");
+            startActivityForResult(intent, ACADEMIC_VISIT);
+            return true;
+        } catch (ActivityNotFoundException | SecurityException error) {
+            academicVisitActive = false;
+            return false;
+        }
+    }
+
+    boolean hasAcademicVisit() { return academicVisitActive; }
     private static final String ORIGIN = "https://app.local";
     private WebView web;
     private NativeBridge bridge;
@@ -46,6 +62,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
+        academicVisitActive = state != null && state.getBoolean("academicVisitActive");
         Store.sweep(this);
         web = new WebView(this);
         setContentView(web);
@@ -56,7 +73,7 @@ public class MainActivity extends Activity {
         settings.setAllowContentAccess(false);
         settings.setSaveFormData(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-        settings.setUserAgentString(settings.getUserAgentString() + " JiangCaiTong/0.5.10");
+        settings.setUserAgentString(settings.getUserAgentString() + " JiangCaiTong/0.5.11");
         bridge = new NativeBridge(web);
         web.addJavascriptInterface(bridge, "Android");
         web.setWebViewClient(new AssetClient());
@@ -88,6 +105,8 @@ public class MainActivity extends Activity {
     protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
         if (request == ACADEMIC_VISIT) {
+            academicVisitActive = false;
+            academicReturning = true;
             String structure = data == null ? "" : data.getStringExtra("structure");
             String grid = data == null ? "" : data.getStringExtra("gridProjection");
             String capture = data == null ? "" : data.getStringExtra("capture");
@@ -158,7 +177,15 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        if (web != null) web.evaluateJavascript("window.refreshSession && window.refreshSession(); window.resumeAcademicSync && window.resumeAcademicSync()", null);
+        boolean refreshAcademic = !academicReturning && !academicVisitActive;
+        academicReturning = false;
+        if (web != null) web.evaluateJavascript("window.refreshSession && window.refreshSession();"
+                + (refreshAcademic ? "window.resumeAcademicSync && window.resumeAcademicSync()" : ""), null);
+    }
+
+    @Override protected void onSaveInstanceState(Bundle state) {
+        state.putBoolean("academicVisitActive", academicVisitActive);
+        super.onSaveInstanceState(state);
     }
 
     @Override

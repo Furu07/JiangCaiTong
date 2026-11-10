@@ -20,5 +20,6 @@
             android:windowSoftInputMode="adjustResize" />
         <activity android:name=".AcademicActivity" android:exported="false"
             android:process=":academic" android:windowSoftInputMode="adjustResize" />
+        <service android:name=".AcademicSyncService" android:exported="false" android:process=":academic" />
     </application>
 </manifest>

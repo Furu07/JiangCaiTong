@@ -362,8 +362,38 @@ public final class NativeBridge {
         if (closed || android.os.Build.VERSION.SDK_INT < 28 || term == null
                 || (!term.isEmpty() && !term.matches("20\\d{2}-20\\d{2}学年第[一二]学期"))) return false;
         return web.post(() -> {
-            if (!closed) ((MainActivity) web.getContext()).openAcademicSync(term, interactive);
+            if (closed) return;
+            MainActivity activity = (MainActivity) web.getContext();
+            if (interactive) {
+                if (!activity.openAcademicSync(term)) {
+                    web.evaluateJavascript("window.academicPortalReturned('','','','busy')", null);
+                }
+                return;
+            }
+            if (activity.hasAcademicVisit()) {
+                academicBackgroundResult("", "busy");
+                return;
+            }
+            android.os.ResultReceiver receiver = new android.os.ResultReceiver(
+                    new android.os.Handler(android.os.Looper.getMainLooper())) {
+                @Override protected void onReceiveResult(int code, android.os.Bundle data) {
+                    if (!closed) academicBackgroundResult(data.getString("capture", ""), data.getString("error", ""));
+                }
+            };
+            try {
+                if (activity.startService(new Intent(activity, AcademicSyncService.class)
+                        .putExtra("term", term).putExtra("receiver", receiver)) == null) {
+                    academicBackgroundResult("", "request");
+                }
+            } catch (IllegalStateException | SecurityException error) {
+                academicBackgroundResult("", "request");
+            }
         });
+    }
+
+    private void academicBackgroundResult(String capture, String error) {
+        web.evaluateJavascript("window.academicBackgroundReturned && window.academicBackgroundReturned("
+                + JSONObject.quote(capture == null ? "" : capture) + "," + JSONObject.quote(error) + ")", null);
     }
 
     @JavascriptInterface

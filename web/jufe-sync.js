@@ -17,7 +17,8 @@
         if (!saved || typeof saved.accountKey !== 'string' || !saved.accountKey || !Array.isArray(saved.terms)) return null;
         const terms = saved.terms.map(Academic.normalizeTerm);
         if (!terms.some(term => term.termId === saved.selected)) return null;
-        return { accountKey: saved.accountKey, terms, selected: saved.selected, suspended: saved.suspended === true };
+        return { accountKey: saved.accountKey, terms, selected: saved.selected,
+          suspended: saved.suspended === true, reauthRequired: saved.reauthRequired === true };
       } catch (error) {
         return null;
       }
@@ -37,7 +38,8 @@
         terms: visible ? binding.terms : [],
         selected: visible ? binding.selected : '',
         entry: visible ? repository.readFor(binding.accountKey, binding.selected) : null,
-        state: visible && session.state === 'authorized' ? 'authorized' : visible ? 'reauthorize' : 'unbound',
+        state: !visible ? 'unbound' : binding.reauthRequired || session.state === 'expired' ? 'reauthorize'
+          : session.state === 'authorized' ? 'authorized' : 'unverified',
         syncing: !!inflight
       };
     }
@@ -101,12 +103,15 @@
       }
       return start(key, async () => {
         try {
-          return await repository.sync(termId);
+          const entry = await repository.sync(termId);
+          if (entry.error && entry.error.code === 'expired') requireReauthorization();
+          return entry;
         } catch (error) {
           if (error.code === 'account-changed') {
             publish({ ...binding, suspended: true });
             adapter.signOut();
           }
+          if (error.code === 'expired') requireReauthorization();
           throw error;
         }
       });
@@ -119,6 +124,7 @@
     }
 
     function restore(candidate, manual = false) {
+      if (binding && binding.reauthRequired) return Promise.reject(new Error('请主动重新绑定教务'));
       if (!binding || binding.suspended || candidate.accountKey !== binding.accountKey) return bind(candidate);
       if (inflight) return Promise.reject(new Error('已有课表同步正在运行'));
       adapter.authorize(candidate);
@@ -127,11 +133,18 @@
 
     function needsRefresh() {
       const state = snapshot();
-      return !!state.selected && (!state.entry || now() - state.entry.syncedAt >= freshFor)
+      return state.state !== 'reauthorize' && !!state.selected && (!state.entry || now() - state.entry.syncedAt >= freshFor)
         && now() - lastAttempt >= retryDelay;
     }
 
-    return { bind, restore, snapshot, refresh, resume, needsRefresh, protectAccount };
+    function requireReauthorization() {
+      adapter.signOut();
+      if (binding && !binding.suspended && !binding.reauthRequired) {
+        publish({ ...binding, reauthRequired: true });
+      }
+    }
+
+    return { bind, restore, snapshot, refresh, resume, needsRefresh, protectAccount, requireReauthorization };
   }
 
   window.JufeSync = { create };
