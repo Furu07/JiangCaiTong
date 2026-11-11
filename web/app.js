@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.6.4';
+const APP_VERSION = '0.6.6';
 const $ = id => document.getElementById(id);
 const tabs = Array.from(document.querySelectorAll('[data-tab]'));
 const native = window.Android;
@@ -30,6 +30,7 @@ function select(tab) {
     else button.removeAttribute('aria-current');
   });
   refreshSession();
+  if (tab === 'study') scheduleStudyUpdates();
 }
 
 let toastTimer;
@@ -197,19 +198,30 @@ async function syncSchedule() {
   }
 }
 
-const studyKey = 'jct.study.v2';
+const studyKeyPrefix = 'jct.study.v3.';
+const oldStudyKey = 'jct.study.v2';
 const activeStudyScope = () => native ? native.cxSessionKey() : '';
-const emptyStudyCache = scope => ({ scope, courses: [], details: {}, at: 0 });
+const emptyStudyCache = (scope, account = '') => ({ scope, account, courses: [], details: {}, updates: {}, at: 0 });
 
 function readStudyCache(scope) {
+  const account = scope ? native.cxAccountKey?.(scope) || scope : '';
+  if (!account) return emptyStudyCache(scope);
   try {
-    // The old cache had no account marker, so it cannot be attributed safely.
-    localStorage.removeItem('jct.study.v1');
-    const entry = JSON.parse(localStorage.getItem(studyKey));
-    if (scope && entry && entry.scope === scope && Array.isArray(entry.courses) && entry.details) return entry;
-    if (entry) localStorage.removeItem(studyKey);
+    const saved = JSON.parse(localStorage.getItem(studyKeyPrefix + account));
+    if (saved?.account === account && Array.isArray(saved.courses) && saved.details) {
+      return { ...saved, scope, updates: saved.updates || {} };
+    }
+    const old = JSON.parse(localStorage.getItem(oldStudyKey));
+    if (old?.scope === scope && Array.isArray(old.courses) && old.details) {
+      const migrated = { ...old, account, updates: {} };
+      try {
+        localStorage.setItem(studyKeyPrefix + account, JSON.stringify(migrated));
+        localStorage.removeItem(oldStudyKey);
+      } catch (_) { /* Keep the old cache available if migration could not be saved. */ }
+      return migrated;
+    }
   } catch (error) { /* Invalid or inaccessible cache. */ }
-  return emptyStudyCache(scope);
+  return emptyStudyCache(scope, account);
 }
 
 let studyCache = readStudyCache(activeStudyScope());
@@ -217,6 +229,12 @@ let selectedCourse = '';
 let studyAttempt = null;
 let studyBusy = false;
 let studyMessage = '';
+let showInactiveStudyCourses = false;
+let studyForeground = true;
+let studyScanTimer;
+let studyRetryAt = 0;
+let studyManualQueue = new Set();
+const studyCheckLimit = 6;
 
 function courseKey(course) {
   return String(course.courseId) + ':' + String(course.classId);
@@ -228,6 +246,9 @@ function reconcileStudyCache() {
     studyCache = readStudyCache(scope);
     selectedCourse = '';
     studyAttempt = null;
+    showInactiveStudyCourses = false;
+    studyManualQueue.clear();
+    studyRetryAt = 0;
     studyMessage = scope ? '已接收学习通会话，请查询课程确认授权。' : '';
   }
   return scope;
@@ -236,18 +257,23 @@ function reconcileStudyCache() {
 function saveStudyCache() {
   if (!studyCache.scope || activeStudyScope() !== studyCache.scope) return;
   try {
-    localStorage.setItem(studyKey, JSON.stringify(studyCache));
+    localStorage.setItem(studyKeyPrefix + studyCache.account, JSON.stringify(studyCache));
   } catch (error) {
     toast('学习通结果仅本次可用，缓存写入失败');
   }
 }
 
-function clearStudyCache() {
+function clearStudyCache(remove = false) {
+  const account = studyCache.account;
   studyCache = emptyStudyCache(activeStudyScope());
   selectedCourse = '';
   studyAttempt = null;
+  showInactiveStudyCourses = false;
+  studyManualQueue.clear();
+  studyRetryAt = 0;
+  if (!remove || !account) return;
   try {
-    localStorage.removeItem(studyKey);
+    localStorage.removeItem(studyKeyPrefix + account);
   } catch (error) { /* This session cannot be displayed without its matching scope. */ }
 }
 
@@ -262,7 +288,17 @@ function showCourseResults(course) {
   const refresh = node('button', '刷新学习任务', 'btn');
   refresh.disabled = studyBusy;
   refresh.addEventListener('click', () => queryStudy(course));
-  card.appendChild(refresh);
+  const controls = node('div', null, 'controls');
+  const activity = studyCache.updates[key];
+  const hidden = StudyActivity.hiddenReason(activity);
+  const visibility = node('button', hidden ? '恢复显示' : '隐藏课程', 'btn');
+  visibility.addEventListener('click', () => changeStudyVisibility(key, hidden ? 'restore' : 'hide'));
+  const always = node('button', '始终显示', 'btn');
+  always.setAttribute('aria-pressed', String(activity?.alwaysVisible === true));
+  always.addEventListener('click', () => changeStudyVisibility(key, activity?.alwaysVisible ? 'unpin' : 'pin'));
+  controls.append(refresh, visibility, always);
+  card.appendChild(controls);
+  if (!activity?.reliable) card.appendChild(node('p', '课程活跃度待确认', 'sub'));
   if (!sections) card.appendChild(node('p', studyBusy ? '正在读取…' : '尚无任务缓存。', 'sub'));
   (sections || []).forEach(section => {
     const group = node('details', null, 'result-group');
@@ -288,6 +324,13 @@ function showCourseResults(course) {
   target.appendChild(card);
 }
 
+function changeStudyVisibility(key, action) {
+  if (!reconcileStudyCache() || !studyCache.courses.some(course => courseKey(course) === key)) return;
+  studyCache.updates[key] = StudyActivity.setVisibility(studyCache.updates[key], action, Date.now());
+  saveStudyCache();
+  renderStudy();
+}
+
 function resultRow(title, subtitle) {
   const row = node('div', null, 'result-row');
   row.appendChild(node('strong', title));
@@ -305,9 +348,15 @@ function renderStudy() {
   empty(target);
   if (studyCache.at) {
     const card = node('section', null, 'card pad');
-    card.appendChild(node('h2', '课程 · ' + studyCache.courses.length + ' 门'));
+    const inactive = studyCache.courses.filter(course => StudyActivity.hiddenReason(studyCache.updates[courseKey(course)]));
+    const visible = studyCache.courses.length - inactive.length;
+    card.appendChild(node('h2', '课程 · ' + visible + ' 门'));
     card.appendChild(node('p', '本机结果 · ' + time(studyCache.at), 'sub'));
     if (!studyCache.courses.length) card.appendChild(node('p', '没有课程记录', 'sub'));
+    const folded = node('details', null, 'result-group');
+    folded.open = showInactiveStudyCourses;
+    folded.appendChild(node('summary', '已隐藏课程 · ' + inactive.length + ' 门'));
+    folded.addEventListener('toggle', () => { showInactiveStudyCourses = folded.open; });
     studyCache.courses.forEach(course => {
       const key = courseKey(course);
       const button = node('button', (course.title || '未命名课程') +
@@ -322,8 +371,25 @@ function renderStudy() {
           $('studyDetails').scrollIntoView({ block: 'nearest' });
         }
       });
-      card.appendChild(button);
+      const activity = studyCache.updates[key];
+      const reason = StudyActivity.hiddenReason(activity);
+      if (!reason) {
+        card.appendChild(button);
+        return;
+      }
+      const row = node('div', null, 'result-row');
+      const publishedAt = Math.max(activity.notices?.publishedAt || 0, activity.homework?.publishedAt || 0);
+      row.append(button, node('p', reason + (publishedAt ? ' · 最近发布 ' + time(publishedAt) : ''), 'sub'));
+      const restore = node('button', '恢复显示', 'btn');
+      restore.addEventListener('click', () => changeStudyVisibility(key, 'restore'));
+      const always = node('button', '始终显示', 'btn');
+      always.addEventListener('click', () => changeStudyVisibility(key, 'pin'));
+      const controls = node('div', null, 'controls');
+      controls.append(restore, always);
+      row.appendChild(controls);
+      folded.appendChild(row);
     });
+    if (inactive.length) card.appendChild(folded);
     target.appendChild(card);
   }
   const current = studyCache.courses.find(course => courseKey(course) === selectedCourse);
@@ -345,13 +411,61 @@ function openStudyLogin() {
   renderStudy();
 }
 
-async function queryStudy(course) {
+function studyUpdateBatch() {
+  const due = studyManualQueue.size
+    ? studyCache.courses.filter(course => studyManualQueue.has(courseKey(course)))
+    : StudyActivity.dueCourses(studyCache.courses, studyCache.updates, courseKey, Date.now());
+  const hidden = due.filter(course => StudyActivity.hiddenReason(studyCache.updates[courseKey(course)]))
+    .slice(0, studyCheckLimit / 2);
+  return hidden.concat(due.filter(course => !hidden.includes(course))).slice(0, studyCheckLimit);
+}
+
+function scheduleStudyUpdates(delay = 0) {
+  clearTimeout(studyScanTimer);
+  if (!native || !studyForeground || document.hidden || !navigator.onLine || studyBusy
+      || !reconcileStudyCache() || !studyUpdateBatch().length) return;
+  studyScanTimer = setTimeout(() => queryStudy(null, true), Math.max(delay, studyRetryAt - Date.now()));
+}
+
+window.pauseStudyUpdates = () => {
+  studyForeground = false;
+  clearTimeout(studyScanTimer);
+};
+window.resumeStudyUpdates = () => {
+  studyForeground = true;
+  scheduleStudyUpdates(1500);
+};
+document.addEventListener('visibilitychange', () => scheduleStudyUpdates(1500));
+window.addEventListener('online', () => scheduleStudyUpdates(1500));
+
+async function scanStudyUpdates(batch, scope) {
+  let checked = 0;
+  for (const course of batch) {
+    if (activeStudyScope() !== scope || !studyForeground || document.hidden) break;
+    const sections = await Learning.readCourse(course, scope, true);
+    if (activeStudyScope() !== scope) break;
+    const key = courseKey(course);
+    studyCache.updates[key] = StudyActivity.update(studyCache.updates[key], sections, Date.now());
+    studyManualQueue.delete(key);
+    if (sections.every(section => !section.error && section.complete)) checked++;
+    if (sections.every(section => section.error) && sections.some(section => section.kind === 'net')) {
+      studyRetryAt = Date.now() + 15 * 60 * 1000;
+      break;
+    }
+  }
+  return checked;
+}
+
+async function queryStudy(course, checkOnly = false) {
   if (!native || studyBusy) return;
   const scope = reconcileStudyCache();
   if (!scope) return;
+  const batch = checkOnly ? studyUpdateBatch() : null;
+  if (batch && (!batch.length || !navigator.onLine || !studyForeground || document.hidden)) return;
+  clearTimeout(studyScanTimer);
   if (course) selectedCourse = courseKey(course);
   studyBusy = true;
-  studyMessage = course ? '正在读取作业、考试与活动…' : '正在读取课程…';
+  studyMessage = course ? '正在读取作业、考试与活动…' : checkOnly ? '正在检查课程更新…' : '正在读取课程…';
   refreshSession();
   try {
     if (course) {
@@ -360,21 +474,31 @@ async function queryStudy(course) {
       const key = courseKey(course);
       const previous = studyCache.details[key];
       const merged = Learning.mergeCourseResults(previous, sections, Date.now());
+      studyCache.updates[key] = StudyActivity.update(studyCache.updates[key], sections, Date.now());
+      studyManualQueue.delete(key);
       studyAttempt = { key, sections: merged.sections };
       if (merged.cache && merged.cache !== previous) studyCache.details[key] = merged.cache;
       studyMessage = sections.every(section => section.error) ? '任务刷新失败，请查看各类别的状态。'
         : sections.some(section => section.error) ? '部分学习任务未更新，请查看各类别的状态。' : '学习任务读取完成。';
-    } else {
+    } else if (!checkOnly) {
       const courses = await Learning.courses(scope);
       if (activeStudyScope() !== scope) return;
-      const details = {};
-      courses.forEach(item => {
-        const key = courseKey(item);
-        if (studyCache.details[key]) details[key] = studyCache.details[key];
-      });
-      studyCache = { scope, courses, details, at: Date.now() };
+      studyCache = { ...studyCache, courses, at: Date.now() };
+      studyManualQueue = new Set(courses.map(courseKey));
+      studyRetryAt = 0;
       studyAttempt = null;
       studyMessage = courses.length ? '课程查询成功，会话已验证。' : '课程查询成功，该账号暂无课程。';
+      saveStudyCache();
+    }
+    if (!course) {
+      const pending = batch || studyUpdateBatch();
+      if (pending.length) {
+        studyMessage = '正在检查课程更新…';
+        renderStudy();
+        const checked = await scanStudyUpdates(pending, scope);
+        if (activeStudyScope() !== scope) return;
+        studyMessage = checked ? '已检查 ' + checked + ' 门课程的通知与作业。' : '本次未确认课程更新。';
+      }
     }
     if (native.cxPersist(scope)) studyMessage += ' 暂时无法保存登录状态。';
     saveStudyCache();
@@ -386,16 +510,20 @@ async function queryStudy(course) {
       } catch (failure) {
         cleared = false;
       }
-      if (studyCache.scope === scope) {
+      const current = activeStudyScope();
+      if (studyCache.scope === scope && (!current || current === scope)) {
         studyMessage = cleared ? '学习通会话已过期，请重新授权。' : '学习通会话已过期，本地登录状态清理失败。';
         clearStudyCache();
       }
     } else if (activeStudyScope() === scope) {
+      if (error.kind === 'busy' || error.kind === 'net') studyRetryAt = Date.now() + 15 * 60 * 1000;
       studyMessage = error.message + (studyCache.at ? '。下方保留上次结果。' : '');
+      saveStudyCache();
     }
   } finally {
     studyBusy = false;
     refreshSession();
+    scheduleStudyUpdates(15000);
     if (course && studyCache.details[selectedCourse] && !$('page-study').hidden) {
       $('studyDetails').scrollIntoView({ block: 'nearest' });
     }
@@ -620,7 +748,7 @@ $('studyAccountAction').addEventListener('click', () => {
   if (!window.confirm('退出学习通并清除本机学习通缓存？')) return;
   try {
     native.cxClear();
-    clearStudyCache();
+    clearStudyCache(true);
     studyMessage = '已退出学习通。';
   } catch (error) {
     studyMessage = '无法清除学习通登录状态。';
@@ -1165,3 +1293,4 @@ Academic.mockAdapter.listTerms().then(terms => {
   renderTermOptions(saved ? schoolPrefix + saved : '');
   if (!saved) showSchoolStatus();
 });
+scheduleStudyUpdates(1500);

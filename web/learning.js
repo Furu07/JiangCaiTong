@@ -201,6 +201,12 @@
     return Math.floor(n / 1000);
   }
 
+  function cxStableId(value) {
+    if (typeof value !== 'number' && typeof value !== 'string') return null;
+    if (typeof value === 'number' && !Number.isSafeInteger(value)) return null;
+    return /^[A-Za-z0-9_-]{1,80}$/.test(String(value ?? '')) ? String(value) : null;
+  }
+
   function cxParseActive(j, nowSec) {
     if (!j || typeof j !== 'object') throw cxErr('无法识别活动列表', 'parse');
     var res = j.result;
@@ -217,7 +223,11 @@
       var a = rows[i];
       if (!a || typeof a !== 'object') continue;
       var title = String(a.nameOne == null ? '' : a.nameOne).trim();
-      if (!title) continue;
+      var kd = cxKindOf(a.activeType);
+      if (!title) {
+        if (kd === 'notice' || kd === 'work') throw cxErr('通知或作业记录缺少标题', 'parse');
+        continue;
+      }
       var st = String(a.status == null ? '' : a.status).trim();
       var name4 = String(a.nameFour == null ? '' : a.nameFour).trim();
       var end = cxMsToSec(a.endTime);
@@ -232,7 +242,6 @@
       }
       var state = st === '1' ? 'live' : (st === '2' ? 'ended' : 'pending');
 
-      var kd = cxKindOf(a.activeType);
       // 🔴 通知的 endTime 是**活动自己的生命周期终点**，不是待办截止时间。
       //    拿它渲染「截止 X」，一条公告会显示成「已截止 2025-09-30」，像漏了件事。
       //    改这里必须同步 chaoxing.py 的 parse_active。
@@ -240,6 +249,7 @@
 
       out.push({
         kind: kd,
+        id: cxStableId(a.id),
         kindName: CX_ACTIVE_KIND[String(a.activeType)] || '活动',
         title: title,
         status: String(a.nameTwo == null ? '' : a.nameTwo).trim(),
@@ -253,7 +263,11 @@
       });
     }
     if (rows.length && !out.length) throw cxErr('活动列表含无法识别的记录', 'parse');
-    return out;
+    const data = j.data;
+    const hasMore = [j, data].some(page => [page.hasMore, page.hasNext].some(flag => /^(1|true)$/i.test(String(flag)))
+      || Number(page.totalCount ?? page.total) > rows.length
+      || Number(page.totalPages ?? page.pageCount) > 1);
+    return { items: out, complete: !hasMore };
   }
 
   function cxMarkup(html) {
@@ -335,8 +349,22 @@
       var raw = tEl ? String(tEl.textContent || '').replace(/\s+/g, ' ').trim() : '';
 
       var dw = cxDue(raw, nowSec);
+      let id = null;
+      try {
+        const url = new URL(li.getAttribute('data') || '', CXS.WORK_LIST);
+        if (url.protocol === 'https:' && /(^|\.)chaoxing\.com$/.test(url.hostname)) {
+          id = cxStableId(url.searchParams.get('workId'));
+        }
+      } catch (_) { /* A row can still be shown without a stable identifier. */ }
+      const publication = /(?:发布时间|发布于)\s*[：:]?\s*(20\d\d-\d\d-\d\d)\s+(\d\d:\d\d)(?::(\d\d))?/.exec(raw);
+      const dateText = publication ? publication[1] + 'T' + publication[2] + ':' + (publication[3] || '00') : '';
+      const parsed = Date.parse(dateText + '+08:00');
+      const publishedAt = Number.isFinite(parsed) && new Date(parsed + 8 * 3600000).toISOString().slice(0, 19) === dateText
+        ? parsed : null;
       out.push({
         kind: 'work',
+        id,
+        publishedAt,
         kindName: '作业',
         title: title,
         status: status,
@@ -347,7 +375,10 @@
         endAt: dw.endAt,
       });
     }
-    return cxTaskResult(doc, out, '作业');
+    const items = cxTaskResult(doc, out, '作业');
+    const pages = doc.querySelector('#page');
+    const hasMore = !!(pages?.children.length || doc.querySelector('a[rel=next], [data-has-more="true"]'));
+    return { items, complete: !hasMore && out.length === lis.length && !ul?.querySelector('li[data]:not([aria-label])') };
   }
 
   async function cxCourses(scope) {
@@ -407,7 +438,7 @@
     if (t.indexOf('无权限的操作') >= 0 || t.indexOf('无效的用户') >= 0) {
       throw cxErr('作业列表读不了，重新连接一次再试', 'deny');
     }
-    return cxParseWork(t);
+    return { ...cxParseWork(t), serverTime: r.serverTime };
   }
 
   async function cxActiveList(c, scope) {
@@ -428,7 +459,7 @@
     var j;
     try { j = JSON.parse(t); }
     catch (e) { throw cxErr('活动列表没读出来，学校系统可能改版了', 'parse'); }
-    return cxParseActive(j);
+    return { ...cxParseActive(j), serverTime: r.serverTime };
   }
 
   async function cxExamList(c, meta, scope) {
@@ -473,28 +504,29 @@
     }
   }
 
-  async function readCourse(course, scope) {
+  async function readCourse(course, scope, updatesOnly = false) {
     let meta;
     let metaError;
     try {
       meta = await cxCourseMeta(course, scope);
     } catch (error) {
-      if (error.kind === 'auth') throw error;
+      if (error.kind === 'auth' || (updatesOnly && error.kind === 'busy')) throw error;
       metaError = error;
     }
     const sections = [
       ['作业', () => cxWorkList(course, meta, scope)],
-      ['考试', () => cxExamList(course, meta, scope)],
+      ['考试', async () => ({ items: await cxExamList(course, meta, scope) })],
       ['活动', () => cxActiveList(course, scope)],
     ];
     const result = [];
     for (const [title, read] of sections) {
+      if (updatesOnly && title === '考试') continue;
       try {
         if (metaError && title !== '活动') throw metaError;
-        result.push({ title, items: await read() });
+        result.push({ title, ...await read() });
       } catch (error) {
-        if (error.kind === 'auth') throw error;
-        result.push({ title, error: error.message });
+        if (error.kind === 'auth' || (updatesOnly && error.kind === 'busy')) throw error;
+        result.push({ title, error: error.message, kind: error.kind });
       }
     }
     return result;

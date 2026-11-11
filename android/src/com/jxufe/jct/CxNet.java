@@ -71,6 +71,14 @@ final class CxNet {
         return current.matchesIdentity() ? current.key : "";
     }
 
+    static String accountKey(String expected) {
+        Session current = session;
+        if (!current.key.equals(expected) || !current.matchesIdentity()) return "";
+        String uid = current.identity.get("_uid");
+        if (uid == null) uid = current.identity.get("UID");
+        return uid == null ? "" : CredStore.studyAccountKey(uid);
+    }
+
     static synchronized void clearSession() {
         CredStore.clearCx();
         // A running HTTP request can update its old jar without restoring the cleared session.

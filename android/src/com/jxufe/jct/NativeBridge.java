@@ -209,6 +209,7 @@ public final class NativeBridge {
                 }
                 JSONObject result = new JSONObject();
                 result.put("status", status);
+                if (study) result.put("serverTime", connection.getDate());
                 if (waterCookies != null) {
                     result.put("sessionSent", sentCookie);
                     result.put("sessionPresent", !waterCookies.getCookieStore().getCookies().isEmpty());
@@ -268,6 +269,7 @@ public final class NativeBridge {
 
     @JavascriptInterface public boolean cxHasLogin() { return CxNet.hasLogin(); }
     @JavascriptInterface public String cxSessionKey() { return CxNet.sessionKey(); }
+    @JavascriptInterface public String cxAccountKey(String expected) { return CxNet.accountKey(expected); }
     @JavascriptInterface public String cxPersist(String expected) { return CxNet.persist(expected); }
     @JavascriptInterface public void cxInvalidate(String expected) { CxNet.invalidate(expected); }
     @JavascriptInterface public String loadWater() { return CredStore.loadWater(); }

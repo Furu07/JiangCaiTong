@@ -31,6 +31,25 @@ final class CredStore {
     static String loadWater() { return loadPlain(FIELD_WATER); }
     static void clearWater() { clearField(FIELD_WATER); }
 
+    static synchronized String studyAccountKey(String uid) {
+        try {
+            final String field = "cx.account.salt";
+            String salt = readBlob(field);
+            if (salt.isEmpty()) {
+                byte[] bytes = new byte[32];
+                new java.security.SecureRandom().nextBytes(bytes);
+                salt = b64(bytes);
+                if (!prefs().edit().putString(field, salt).commit()) return "";
+            }
+            javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256");
+            mac.init(new javax.crypto.spec.SecretKeySpec(unB64(salt), "HmacSHA256"));
+            return Base64.encodeToString(mac.doFinal(uid.getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+                    Base64.NO_WRAP | Base64.URL_SAFE | Base64.NO_PADDING);
+        } catch (Exception ignored) {
+            return "";
+        }
+    }
+
     static String waterState() {
         if (readBlob(FIELD_WATER).isEmpty()) return "none";
         return loadWater().isEmpty() ? "broken" : "ok";

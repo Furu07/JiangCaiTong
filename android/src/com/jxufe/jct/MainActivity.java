@@ -73,7 +73,7 @@ public class MainActivity extends Activity {
         settings.setAllowContentAccess(false);
         settings.setSaveFormData(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-        settings.setUserAgentString(settings.getUserAgentString() + " JiangCaiTong/0.6.4");
+        settings.setUserAgentString(settings.getUserAgentString() + " JiangCaiTong/0.6.6");
         bridge = new NativeBridge(web);
         web.addJavascriptInterface(bridge, "Android");
         web.setWebViewClient(new AssetClient());
@@ -180,7 +180,13 @@ public class MainActivity extends Activity {
         boolean refreshAcademic = !academicReturning && !academicVisitActive;
         academicReturning = false;
         if (web != null) web.evaluateJavascript("window.refreshSession && window.refreshSession();"
+                + "window.resumeStudyUpdates && window.resumeStudyUpdates();"
                 + (refreshAcademic ? "window.resumeAcademicSync && window.resumeAcademicSync()" : ""), null);
+    }
+
+    @Override protected void onPause() {
+        if (web != null) web.evaluateJavascript("window.pauseStudyUpdates && window.pauseStudyUpdates()", null);
+        super.onPause();
     }
 
     @Override protected void onSaveInstanceState(Bundle state) {
