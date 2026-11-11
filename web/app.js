@@ -1,10 +1,11 @@
 'use strict';
 
-const APP_VERSION = '0.8.0';
+const APP_VERSION = '0.8.1';
 const $ = id => document.getElementById(id);
 const tabs = Array.from(document.querySelectorAll('[data-tab]'));
 const native = window.Android;
 const zhuli = Zhuli.create(native);
+const zhuliDevicePage = ZhuliDevicePage.mount(ZhuliDevices.create());
 const days = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 
 function node(tag, text, className) {
@@ -816,7 +817,7 @@ function refreshWater() {
     try {
       $('balance').textContent = currency(await Water.balance());
     } catch (error) {
-      if (error.kind === 'auth') throw error;
+      if (error.kind === 'auth' || error.kind === 'session-changed') throw error;
       errors.push('余额 · ' + error.message);
       $('balance').textContent = '未读到';
     }
@@ -825,7 +826,7 @@ function refreshWater() {
       showDevices(devices);
       $('deviceStatus').textContent = devices.length ? '刚刚更新' : '没有设备记录';
     } catch (error) {
-      if (error.kind === 'auth') throw error;
+      if (error.kind === 'auth' || error.kind === 'session-changed') throw error;
       errors.push('设备 · ' + error.message);
       $('deviceStatus').textContent = '更新失败，保留已有设备记录';
     }
@@ -866,6 +867,7 @@ function renderAccounts() {
 }
 
 function renderZhuli() {
+  zhuliDevicePage.render();
   const status = zhuli.status();
   const button = $('zhuliOpen');
   button.hidden = status === 'unavailable';

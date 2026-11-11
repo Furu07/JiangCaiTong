@@ -19,6 +19,7 @@ async function main() {
   let debug = true;
   let configured = false;
   let saveError = '';
+  let stored = '';
   let reply = { status: 200, body: '{"code":0}', sessionPresent: true };
   let finishSend;
   const env = {
@@ -28,13 +29,18 @@ async function main() {
       waterLoginConfigured: () => configured,
       signWaterLogin: sign,
       clearWaterAttempt: id => cleared.push(id),
+      loadWater: () => stored,
+      clearWater: () => { stored = ''; },
       saveWater: json => {
-        if (!saveError) saved.push(JSON.parse(json));
+        if (!saveError) {
+          stored = json;
+          saved.push(JSON.parse(json));
+        }
         return saveError;
       }
     },
     nativeRequest(method, url, body, referer, headers, scope, attempt) {
-      calls.push({ method, url, body: JSON.parse(body), headers, scope, attempt });
+      calls.push({ method, url, body: body ? JSON.parse(body) : null, headers, scope, attempt });
       return reply;
     }
   };
@@ -153,7 +159,23 @@ async function main() {
   for (const value of [phone, otherPhone, sms, token, key, salt]) assert(!trace.includes(value));
   debug = false;
   assert.equal(water.diagnostics().length, 0);
-  console.log('PASS 798 attempt binding, wire parity, error classification, storage and debug redaction');
+
+  let finishDevices, finishBills;
+  reply = new Promise(resolve => { finishDevices = resolve; });
+  const oldDevices = water.devices();
+  reply = new Promise(resolve => { finishBills = resolve; });
+  const oldBills = water.bills();
+  water.logout();
+  finishDevices({ status: 200, body: '{"code":0,"data":{"favos":[]}}' });
+  await failed(oldDevices, 'session-changed');
+  assert.equal(stored, '');
+  await issueSms();
+  reply = { status: 200, body: '{"code":0,"data":{"al":{"token":"new-fixture-session"}}}' };
+  await water.login(phone, sms);
+  finishBills({ status: 401, body: '{}' });
+  await failed(oldBills, 'session-changed');
+  assert.equal(JSON.parse(stored).token, 'new-fixture-session');
+  console.log('PASS 798 attempt binding, wire parity, error classification, storage, redaction and stale-response rejection');
 }
 
 main().catch(error => { console.error(error); process.exitCode = 1; });

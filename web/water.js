@@ -13,6 +13,7 @@
   let smsAttempt = null;
   let loginBusy = false;
   const diagnostics = [];
+  let sessionRevision = 0;
   const diagnosticEnabled = () => !!(window.Android && Android.debugDiagnosticsEnabled
     && Android.debugDiagnosticsEnabled());
   const loginConfigured = () => !!(window.Android && Android.waterLoginConfigured
@@ -209,6 +210,18 @@
     return Android.saveWater(JSON.stringify(session));
   }
 
+  function wVerify(revision) {
+    if (revision !== sessionRevision) throw wErr('798 会话已变化，请重新查询。', 'session-changed');
+  }
+
+  async function wRead(path, session, revision) {
+    try {
+      return await wReq('GET', path, wDev(session), null);
+    } finally {
+      wVerify(revision);
+    }
+  }
+
   const Water = {
     state: function () {
       const session = wLoad();
@@ -273,6 +286,7 @@
         }
         const failure = wSave({ token, devices: [], at: 0 });
         if (failure) throw wErr('798 已通过验证，但本机未能安全保存会话', 'storage');
+        sessionRevision++;
       });
     },
 
@@ -280,11 +294,13 @@
     canLogin: phone => !!(smsAttempt && smsAttempt.issued && smsAttempt.phone === phone),
     diagnostics: () => diagnosticEnabled()
       ? [{ phase: 'configuration', ...protocolState() }, ...diagnostics.map(entry => ({ ...entry }))] : [],
-    logout: function () { clearLoginAttempt(); Android.clearWater(); },
+    logout: function () { clearLoginAttempt(); sessionRevision++; Android.clearWater(); },
 
     balance: async function () {
       var st = wLoad();
-      var js = await wReq('GET', '/acc/wallet/owner', wDev(st), null);
+      const revision = sessionRevision;
+      var js = await wRead('/acc/wallet/owner', st, revision);
+      wVerify(revision);
       var data = wCheck(js) || {};
       var cands = [];
       if (data.aw && typeof data.aw === 'object') cands.push(data.aw);
@@ -304,7 +320,9 @@
     /** 列设备。🔴 favos 键不存在 = 响应变了（报错）；存在但是空 = 真没有设备。 */
     devices: async function () {
       var st = wLoad();
-      var js = await wReq('GET', '/ui/app/master', wDev(st), null);
+      const revision = sessionRevision;
+      var js = await wRead('/ui/app/master', st, revision);
+      wVerify(revision);
       var data = wCheck(js) || {};
       if (!Array.isArray(data.favos)) throw wErr('设备列表没读出来，平台可能改版了', 'data');
       var favos = data.favos;
@@ -325,9 +343,11 @@
 
     bills: async function (page, size) {
       var st = wLoad();
+      const revision = sessionRevision;
       var pg = (page == null ? 0 : page), sz = (size == null ? 20 : size);
       var path = '/bill/lst-owner?page=' + pg + '&size=' + sz;
-      var js = await wReq('GET', path, wDev(st), null);
+      var js = await wRead(path, st, revision);
+      wVerify(revision);
       wCheck(js);
       var recs = wRecords(js);
       if (recs == null) throw wErr('消费记录没读出来，平台可能改版了', 'data');

@@ -15,6 +15,8 @@
   <script defer src="study-activity.js"></script>
   <script defer src="water.js"></script>
   <script defer src="zhuli.js"></script>
+  <script defer src="zhuli-devices.js"></script>
+  <script defer src="zhuli-device-page.js"></script>
   <script defer src="academic-records.js"></script>
   <script defer src="todo.js"></script>
   <script defer src="app.js"></script>
@@ -180,11 +182,37 @@
       <div class="scroll" id="life-zhuli" hidden>
         <section class="card pad">
           <h2>住理生活</h2>
-          <p class="sub status-note" id="zhuliStatus" role="status"></p>
-          <p class="sub">已核实项目 · 江西财经大学麦庐园校区洗浴、直饮水项目</p>
-          <p class="sub">请在官方 App 登录并查看校园项目、余额、洗浴设备和使用记录。</p>
+          <p class="sub" id="zhuliProject">江西财经大学麦庐园校区洗浴、直饮水项目</p>
+        </section>
+        <section class="card pad">
+          <h2>洗浴设备</h2>
+          <p class="sub status-note" id="zhuliDeviceStatus" role="status"></p>
+          <p class="sub" id="zhuliDeviceTime"></p>
           <div class="controls">
-            <button class="btn primary" type="button" id="zhuliOpen" hidden>打开官方 App</button>
+            <button class="btn" type="button" id="zhuliRefresh" hidden>刷新设备</button>
+            <select id="zhuliBuilding" aria-label="楼栋" hidden></select>
+            <select id="zhuliFloor" aria-label="楼层" hidden></select>
+          </div>
+          <div id="zhuliDeviceList"></div>
+          <div id="zhuliSelection" hidden>
+            <h3 id="zhuliSelectedName" class="course-name"></h3>
+            <p class="sub status-note" id="zhuliConnection" role="status"></p>
+            <p class="sub" id="zhuliFee"></p>
+            <div class="controls">
+              <button class="btn primary" type="button" id="zhuliConnect" hidden>连接设备</button>
+              <button class="btn" type="button" id="zhuliCheck" hidden>核查设备状态</button>
+              <button class="btn" type="button" id="zhuliDisconnect" hidden>解除连接</button>
+              <button class="btn primary" type="button" id="zhuliStart" hidden>开始洗浴</button>
+              <button class="btn" type="button" id="zhuliStop" hidden>结束洗浴</button>
+            </div>
+          </div>
+        </section>
+        <section class="card pad">
+          <h2>官方服务</h2>
+          <p class="sub" id="zhuliStatus" role="status"></p>
+          <p class="sub">在官方 App 连接设备，或查看余额和使用记录。</p>
+          <div class="controls">
+            <button class="btn" type="button" id="zhuliOpen" hidden>打开官方 App</button>
           </div>
         </section>
       </div>
