@@ -151,11 +151,20 @@ public final class NativeBridge {
         String path = url.getPath();
         if ("GET".equals(method)) {
             return (WATER_API + "/acc/wallet/owner").equals(path)
+                    || (WATER_API + "/acc/view-info").equals(path)
                     || (WATER_API + "/ui/app/master").equals(path)
-                    || (WATER_API + "/bill/lst-owner").equals(path);
+                    || (WATER_API + "/bill/lst-owner").equals(path)
+                    || ((WATER_API + "/bill/view-full").equals(path)
+                        && uri.getQueryParameterNames().equals(Collections.singleton("id"))
+                        && uri.getQueryParameters("id").size() == 1
+                        && validWaterBillId(uri.getQueryParameter("id")));
         }
         return "POST".equals(method) && ((WATER_API + "/acc/login/code").equals(path)
                 || (WATER_API + "/acc/login").equals(path));
+    }
+
+    private static boolean validWaterBillId(String id) {
+        return id != null && id.matches("[A-Za-z0-9_-]{1,128}");
     }
 
     private JSONObject request(String method, URL url, String body, String referer,

@@ -175,7 +175,36 @@ async function main() {
   finishBills({ status: 401, body: '{}' });
   await failed(oldBills, 'session-changed');
   assert.equal(JSON.parse(stored).token, 'new-fixture-session');
-  console.log('PASS 798 attempt binding, wire parity, error classification, storage, redaction and stale-response rejection');
+
+  reply = { status: 200, body: '{"code":-99}' };
+  await failed(water.verify(), 'auth');
+  reply = { status: 200, body: '{"code":0,"data":{"id":"fixture-account"}}' };
+  await water.verify();
+  assert.equal(new URL(calls.at(-1).url).pathname, '/api/v1/acc/view-info');
+  assert.equal(calls.at(-1).headers.Authorization, 'new-fixture-session');
+
+  reply = { status: 200, body: '{"code":0,"data":{"favos":[{"id":"fixture-device","name":"样本"},{"id":"fixture-device"}]}}' };
+  assert.equal((await water.devices()).length, 1);
+  reply = { status: 200, body: '{"code":0,"data":{"aw":{"total":"12.5invalid"}}}' };
+  assert.equal(await water.balance(), null);
+
+  const beforeDetail = calls.length;
+  await failed(water.billDetail('fixture-bill'), 'params');
+  assert.equal(calls.length, beforeDetail);
+  reply = { status: 200, body: '{"code":0,"data":{"records":[{"id":"fixture-bill","type":91}],"total":1}}' };
+  assert.equal((await water.bills()).items[0].id, 'fixture-bill');
+  reply = { status: 200, body: '{"code":0,"data":{"bill":{"id":"other-bill"}}}' };
+  await failed(water.billDetail('fixture-bill'), 'data');
+  reply = { status: 200, body: '{"code":0,"data":{"bill":{"id":"fixture-bill","type":91,"cata":6,"status":3,"payment":0,"promo":{"type":4},"discount":0.25}}}' };
+  const bill = await water.billDetail('fixture-bill');
+  assert.equal(bill.settled, true);
+  assert.equal(bill.money, 0);
+  assert.equal(bill.scoreDiscount, 0.25);
+  assert.equal(new URL(calls.at(-1).url).pathname, '/api/v1/bill/view-full');
+  assert.equal(new URL(calls.at(-1).url).searchParams.get('id'), 'fixture-bill');
+  water.logout();
+  await failed(water.billDetail('fixture-bill'), 'params');
+  console.log('PASS 798 login, session isolation, account check, devices, balance and bill details');
 }
 
 main().catch(error => { console.error(error); process.exitCode = 1; });

@@ -142,6 +142,7 @@
           <div class="controls">
             <button class="btn primary" id="waterLoginOpen" hidden>手机验证码登录</button>
             <button class="btn" id="waterOfficial" hidden>打开官方 App</button>
+            <button class="btn" id="waterVerify" type="button" hidden>核验用水会话</button>
             <button class="btn" id="waterRefresh" hidden>刷新余额与设备</button>
           </div>
           <p class="sub" id="waterExternalHelp" hidden>可在官方 App 查看余额、设备和消费记录。</p>
@@ -167,7 +168,12 @@
         </div>
         <div id="waterResults" hidden>
           <section class="card pad"><h2>余额</h2><p id="balance" class="value">—</p></section>
-          <section class="card pad"><h2>设备</h2><p class="sub" id="deviceStatus"></p><div id="devices"></div></section>
+          <section class="card pad">
+            <h2>收藏设备</h2>
+            <p class="sub" id="deviceStatus"></p>
+            <div id="devices"></div>
+            <p class="sub status-note" id="waterSelected" role="status"></p>
+          </section>
           <section class="card pad">
             <h2>消费记录</h2>
             <p class="sub" id="billStatus" role="status"></p>

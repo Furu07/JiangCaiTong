@@ -1,4 +1,4 @@
-/* 慧生活798查询与手动验证码登录移植自航院通。 */
+/* 798 请求流程参考航院通（Hobson）和 life-798（nocookies111），均为 MIT。 */
 (function () {
   'use strict';
 
@@ -13,6 +13,7 @@
   let smsAttempt = null;
   let loginBusy = false;
   const diagnostics = [];
+  const queriedBillIds = new Set();
   let sessionRevision = 0;
   const diagnosticEnabled = () => !!(window.Android && Android.debugDiagnosticsEnabled
     && Android.debugDiagnosticsEnabled());
@@ -141,7 +142,8 @@
   function wNum(v) {
     if (v == null || typeof v === 'boolean') return null;
     if (typeof v === 'number') return isFinite(v) ? v : null;
-    var n = parseFloat(String(v).trim());
+    if (typeof v !== 'string' || !/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/.test(v.trim())) return null;
+    var n = Number(v.trim());
     return isFinite(n) ? n : null;
   }
 
@@ -222,6 +224,24 @@
     }
   }
 
+  function nextSession() {
+    sessionRevision++;
+    queriedBillIds.clear();
+  }
+
+  function wBillFields(item) {
+    const data = item.data || {};
+    const device = item.dev || {};
+    return {
+      id: String(item.id || '').trim(),
+      at: wMs(item.utime || item.ctime),
+      money: wNum(item.payment),
+      did: String(device.id || item.did || data.did || data.deviceId || '').trim(),
+      kind: wInt(item.type),
+      msg: typeof item.msg === 'string' ? item.msg.trim() : ''
+    };
+  }
+
   const Water = {
     state: function () {
       const session = wLoad();
@@ -286,7 +306,7 @@
         }
         const failure = wSave({ token, devices: [], at: 0 });
         if (failure) throw wErr('798 已通过验证，但本机未能安全保存会话', 'storage');
-        sessionRevision++;
+        nextSession();
       });
     },
 
@@ -294,7 +314,17 @@
     canLogin: phone => !!(smsAttempt && smsAttempt.issued && smsAttempt.phone === phone),
     diagnostics: () => diagnosticEnabled()
       ? [{ phase: 'configuration', ...protocolState() }, ...diagnostics.map(entry => ({ ...entry }))] : [],
-    logout: function () { clearLoginAttempt(); sessionRevision++; Android.clearWater(); },
+    logout: function () { clearLoginAttempt(); nextSession(); Android.clearWater(); },
+
+    verify: async function () {
+      const revision = sessionRevision;
+      const reply = await wRead('/acc/view-info', wLoad(), revision);
+      wVerify(revision);
+      const account = wCheck(reply);
+      if (!(typeof account?.id === 'string' && account.id.trim()) && !Number.isSafeInteger(account?.id)) {
+        throw wErr('798 响应未确认用水账户。', 'data');
+      }
+    },
 
     balance: async function () {
       var st = wLoad();
@@ -326,12 +356,14 @@
       var data = wCheck(js) || {};
       if (!Array.isArray(data.favos)) throw wErr('设备列表没读出来，平台可能改版了', 'data');
       var favos = data.favos;
-      var out = [];
+      const out = [];
+      const ids = new Set();
       for (var i = 0; i < favos.length; i++) {
         var it = favos[i];
         if (!it || typeof it !== 'object') continue;
         var did = String(it.id || '').trim();
-        if (!did) continue;
+        if (!did || ids.has(did)) continue;
+        ids.add(did);
         out.push({ id: did, name: String(it.name || '').trim() });
       }
       // 顺手记进本机：下次进来先画缓存，不用等网络
@@ -351,22 +383,11 @@
       wCheck(js);
       var recs = wRecords(js);
       if (recs == null) throw wErr('消费记录没读出来，平台可能改版了', 'data');
-      var out = [];
-      for (var i = 0; i < recs.length; i++) {
-        var it = recs[i];
-        if (!it || typeof it !== 'object') continue;
-        var dd = (it.data && typeof it.data === 'object') ? it.data : {};
-        var dv = (it.dev && typeof it.dev === 'object') ? it.dev : {};
-        var did = dv.id || it.did || dd.did || dd.deviceId || '';
-        out.push({
-          id: String(it.id || '').trim(),
-          at: wMs(it.utime || it.ctime),
-          money: wNum(it.payment),
-          did: String(did).trim(),
-          kind: wInt(it.type),
-          msg: String(it.msg || '').trim()
-        });
-      }
+      const out = recs.filter(it => it && typeof it === 'object' && !Array.isArray(it)).map(wBillFields);
+      if (pg === 0) queriedBillIds.clear();
+      out.forEach(item => {
+        if (/^[A-Za-z0-9_-]{1,128}$/.test(item.id)) queriedBillIds.add(item.id);
+      });
       var total = null;
       if (js.data && typeof js.data === 'object' && !Array.isArray(js.data)) {
         total = wInt(js.data.total != null ? js.data.total : js.data.totalCount);
@@ -374,6 +395,24 @@
       var more = (total != null) ? ((pg + 1) * sz < total) : (out.length >= sz);
       return { items: out, more: more, total: total };
     },
+
+    billDetail: async function (id) {
+      if (!queriedBillIds.has(id)) throw wErr('请先从本账号的消费记录选择账单。', 'params');
+      const revision = sessionRevision;
+      const reply = await wRead('/bill/view-full?id=' + encodeURIComponent(id), wLoad(), revision);
+      wVerify(revision);
+      const bill = wCheck(reply)?.bill;
+      if (!bill || String(bill.id ?? '').trim() !== id) {
+        throw wErr('798 未返回与所选账单匹配的明细。', 'data');
+      }
+      const status = wNum(bill.status);
+      const fields = wBillFields(bill);
+      return {
+        ...fields, status: Number.isInteger(status) ? status : null,
+        settled: fields.kind === 91 && status === 3 && (bill.cata == null || wNum(bill.cata) === 6),
+        scoreDiscount: wNum(bill.promo?.type) === 4 ? wNum(bill.discount) : null
+      };
+    }
 
   };
 

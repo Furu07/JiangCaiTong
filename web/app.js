@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.8.1';
+const APP_VERSION = '0.8.2';
 const $ = id => document.getElementById(id);
 const tabs = Array.from(document.querySelectorAll('[data-tab]'));
 const native = window.Android;
@@ -664,6 +664,8 @@ async function queryStudy(course, checkOnly = false) {
 let waterBusy = false;
 let waterExpired = false;
 let waterMessage = '';
+let waterVerifiedAt = 0;
+let waterDeviceId = '';
 let captcha = null;
 let captchaReady = false;
 let smsUntil = 0;
@@ -676,17 +678,19 @@ function renderWater() {
   const connected = state.linked && !waterExpired;
   const canStart = Water.loginConfigured();
   $('waterStatus').textContent = waterMessage || (connected
-    ? '饮水服务已登录。' : !canStart && native
+    ? waterVerifiedAt ? '用水会话已核验 · ' + time(waterVerifiedAt) : '本机已保存用水会话。'
+    : !canStart && native
       ? '应用内短信登录暂不可用，缺少授权配置。' : state.broken
       ? '登录已失效，请重新登录。'
       : '登录后查看余额和消费记录。');
   $('waterStatus').dataset.tone = /失败|错误|失效|不可用/.test($('waterStatus').textContent) ? 'warning'
     : connected && !waterBusy ? 'success' : '';
-  $('waterLoginOpen').hidden = connected || !canStart;
+  $('waterLoginOpen').hidden = !canStart;
+  $('waterLoginOpen').textContent = connected ? '切换用水账号' : '手机验证码登录';
   $('waterOfficial').hidden = $('waterExternalHelp').hidden = !native || !native.openOfficialWater;
-  $('waterRefresh').hidden = !connected;
+  $('waterVerify').hidden = $('waterRefresh').hidden = !connected;
   $('waterResults').hidden = !connected;
-  ['waterRefresh', 'waterLoginCancel', 'billRefresh', 'billMore', 'phone', 'graph', 'sms']
+  ['waterVerify', 'waterRefresh', 'waterLoginCancel', 'billRefresh', 'billMore', 'phone', 'graph', 'sms']
     .forEach(id => { $(id).disabled = !native || waterBusy; });
   $('waterLoginOpen').disabled = $('loadCaptcha').disabled = !canStart || waterBusy;
   $('waterLogin').disabled = !canStart || waterBusy || !Water.canLogin($('phone').value.trim());
@@ -703,7 +707,26 @@ function renderWater() {
 
 function showDevices(devices) {
   empty($('devices'));
-  devices.forEach(device => $('devices').appendChild(resultRow(device.name || '饮水机', '编号 · ' + device.id)));
+  if (!devices.some(device => device.id === waterDeviceId)) waterDeviceId = '';
+  function showSelection() {
+    const selected = devices.find(device => device.id === waterDeviceId);
+    $('waterSelected').textContent = selected ? '已选择 ' + (selected.name || selected.id) + ' · 实时状态待核实' : '';
+    $('devices').querySelectorAll('button').forEach((button, index) => {
+      button.setAttribute('aria-pressed', String(devices[index].id === waterDeviceId));
+    });
+  }
+  devices.forEach(device => {
+    const button = node('button', null, 'course-list-item');
+    button.type = 'button';
+    button.append(node('span', device.name || '饮水机', 'course-name'),
+      node('span', '编号 · ' + device.id, 'course-meta'));
+    button.addEventListener('click', () => {
+      waterDeviceId = device.id;
+      showSelection();
+    });
+    $('devices').appendChild(button);
+  });
+  showSelection();
 }
 
 function showCaptcha() {
@@ -723,8 +746,11 @@ function showCaptcha() {
 }
 
 function resetWaterView() {
+  waterVerifiedAt = 0;
+  waterDeviceId = '';
   $('balance').textContent = '—';
   $('deviceStatus').textContent = '';
+  $('waterSelected').textContent = '';
   $('billStatus').textContent = '';
   empty($('devices'));
   empty($('bills'));
@@ -744,6 +770,7 @@ function hideWaterForm() {
 
 function showWaterForm() {
   if (!Water.loginConfigured()) return;
+  selectLifeService('water');
   select('life');
   $('waterForm').hidden = false;
   $('phone').focus();
@@ -811,6 +838,14 @@ function currency(amount) {
   return typeof amount === 'number' ? '¥' + amount.toFixed(2) : '金额未读到';
 }
 
+function verifyWater() {
+  runWater(async () => {
+    await Water.verify();
+    waterVerifiedAt = Date.now();
+    waterMessage = '';
+  });
+}
+
 function refreshWater() {
   runWater(async () => {
     const errors = [];
@@ -842,8 +877,29 @@ function queryBills(more) {
     if (!more) empty($('bills'));
     result.items.forEach(item => {
       const date = item.at ? time(item.at) : '时间未读到';
-      $('bills').appendChild(resultRow(item.msg || '消费记录',
-        [currency(item.money), date, item.did ? '设备 ' + item.did : ''].filter(Boolean).join(' · ')));
+      const caption = [currency(item.money), date, item.did ? '设备 ' + item.did : ''].filter(Boolean).join(' · ');
+      const title = item.msg || '消费记录';
+      if (!/^[A-Za-z0-9_-]{1,128}$/.test(item.id)) {
+        $('bills').appendChild(resultRow(title, caption));
+        return;
+      }
+      const button = node('button', null, 'course-list-item');
+      button.type = 'button';
+      button.append(node('span', title, 'course-name'), node('span', caption, 'course-meta'));
+      button.addEventListener('click', () => runWater(async () => {
+        const detail = await Water.billDetail(item.id);
+        if (!$('page-life').hidden && !$('life-water').hidden) {
+          showDetails('798 账单详情', [
+            '账单金额 · ' + currency(detail.money),
+            detail.scoreDiscount != null ? '积分抵扣 · ' + currency(detail.scoreDiscount) : '',
+            detail.settled ? '账单已结算' : detail.status != null ? '状态码 · ' + detail.status : '',
+            detail.at ? '账单时间 · ' + time(detail.at) : '',
+            detail.did ? '设备 · ' + detail.did : ''
+          ].filter(Boolean));
+        }
+        waterMessage = '账单详情已读取。';
+      }));
+      $('bills').appendChild(button);
     });
     billPage = page;
     moreBills = result.more;
@@ -962,6 +1018,7 @@ $('zhuliOpen').addEventListener('click', () => {
 $('studyLogin').addEventListener('click', openStudyLogin);
 $('studyRefresh').addEventListener('click', () => queryStudy(null));
 $('waterLoginOpen').addEventListener('click', showWaterForm);
+$('waterVerify').addEventListener('click', verifyWater);
 $('waterOfficial').addEventListener('click', () => native.openOfficialWater());
 $('waterLoginCancel').addEventListener('click', hideWaterForm);
 $('phone').addEventListener('input', () => {
