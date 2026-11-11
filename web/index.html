@@ -29,11 +29,13 @@
         <button class="btn" type="button" data-academic="exams" aria-pressed="false">考试安排</button>
       </nav>
       <div class="scroll" id="academic-timetable">
-        <div class="card pad">
-          <label for="term">课表学期</label>
-          <select id="term"></select>
+        <div class="card pad schedule-tools">
+          <div class="field-inline">
+            <label for="term">学期</label>
+            <select id="term"></select>
+          </div>
           <p class="sub" id="scheduleStatus" role="status">正在读取课表…</p>
-          <div class="controls">
+          <div class="week-controls">
             <button class="btn" id="previousWeek">上一周</button>
             <select id="week" aria-label="教学周"></select>
             <button class="btn" id="nextWeek">下一周</button>
@@ -71,13 +73,15 @@
         </section>
       </div>
       <div class="scroll" id="academic-records" hidden>
-        <section class="card pad">
+        <section class="card pad record-tools">
           <h2 id="recordTitle"></h2>
-          <label for="recordTerm">教务学期</label>
-          <select id="recordTerm"></select>
-          <p class="sub" id="recordStatus" role="status"></p>
-          <div class="controls">
+          <div class="field-inline controls">
+            <label for="recordTerm">教务学期</label>
+            <select id="recordTerm"></select>
             <button class="btn" id="recordRefresh" type="button" hidden>刷新</button>
+          </div>
+          <p class="sub status-note" id="recordStatus" role="status"></p>
+          <div class="controls">
             <button class="btn" id="recordPortal" type="button">在校方教务查看</button>
             <button class="btn" id="recordBack" type="button" hidden>前往课表绑定</button>
           </div>
@@ -86,39 +90,28 @@
       </div>
     </main>
     <main class="page" id="page-study" hidden>
-      <header class="pagehead"><h1>学习</h1></header>
+      <header class="pagehead"><h1>学习</h1><button class="btn outline" id="studyRefresh" disabled>刷新课程</button></header>
       <div class="scroll">
-        <div class="card pad">
-          <h2>超星学习通</h2>
-          <p class="sub" id="studyStatus" role="status"></p>
+        <div class="card pad study-summary">
+          <h2>学习通</h2>
+          <p class="sub status-note" id="studyStatus" role="status"></p>
           <div class="controls">
-            <button class="btn primary" id="studyLogin">打开官方登录页</button>
-            <button class="btn" id="studyRefresh" disabled>刷新课程与更新</button>
+            <button class="btn primary" id="studyLogin">登录学习通</button>
           </div>
         </div>
+        <div id="studyTasks"></div>
         <div id="studyCourses"></div>
         <div id="studyDetails"></div>
       </div>
     </main>
     <main class="page" id="page-todo" hidden>
-      <header class="pagehead"><h1>待办</h1></header>
+      <header class="pagehead"><h1>待办</h1><p class="sub" id="todoCount"></p></header>
       <div class="scroll">
-        <section class="card pad">
+        <section class="card todo-add">
           <form id="todoForm" autocomplete="off">
-            <label for="todoTitle" id="todoTitleLabel">快速添加待办</label>
             <div class="todo-input">
-              <input id="todoTitle" maxlength="120" required>
+              <input id="todoTitle" maxlength="120" aria-label="待办标题" placeholder="添加待办…" required>
               <button class="btn primary" id="todoSave" type="submit">添加</button>
-            </div>
-            <div id="todoDetails" hidden>
-              <label for="todoNotes">备注</label>
-              <textarea id="todoNotes" rows="3" maxlength="1000"></textarea>
-              <label for="todoDue">截止日期</label>
-              <input id="todoDue" type="date">
-              <div class="controls">
-                <button class="btn" id="todoCancel" type="button">取消编辑</button>
-                <button class="btn" id="todoDelete" type="button">删除</button>
-              </div>
             </div>
           </form>
           <p class="sub" id="todoStatus" role="status"></p>
@@ -128,8 +121,7 @@
           <button class="btn" type="button" data-todo-filter="open" aria-pressed="true">未完成</button>
           <button class="btn" type="button" data-todo-filter="done" aria-pressed="false">已完成</button>
         </nav>
-        <section class="card pad" aria-label="待办事项">
-          <p class="sub" id="todoCount"></p>
+        <section class="card" aria-label="待办事项">
           <div id="todoList"></div>
         </section>
       </div>
@@ -139,13 +131,13 @@
       <div class="scroll">
         <div class="card pad">
           <h2>慧生活798</h2>
-          <p class="sub" id="waterStatus" role="status"></p>
+          <p class="sub status-note" id="waterStatus" role="status"></p>
           <div class="controls">
             <button class="btn primary" id="waterLoginOpen" hidden>手机验证码登录</button>
-            <button class="btn" id="waterOfficial" hidden>打开官方慧生活798（外部服务）</button>
+            <button class="btn" id="waterOfficial" hidden>打开官方 App</button>
             <button class="btn" id="waterRefresh" hidden>刷新余额与设备</button>
           </div>
-          <p class="sub" id="waterExternalHelp" hidden>使用官方 App 查看余额、设备和消费记录。未安装时打开应用商店页面。</p>
+          <p class="sub" id="waterExternalHelp" hidden>可在官方 App 查看余额、设备和消费记录。</p>
           <form id="waterForm" autocomplete="off" hidden>
             <label>手机号<input id="phone" inputmode="numeric" type="tel" maxlength="11" required></label>
             <label>图形验证码<input id="graph" maxlength="12"></label>
@@ -186,17 +178,35 @@
       <div class="scroll">
         <section class="card pad">
           <h2>服务账号</h2>
-          <p class="sub" id="studyAccount"></p>
-          <button class="btn" id="studyAccountAction"></button>
-          <p class="sub" id="waterAccount"></p>
-          <button class="btn" id="waterAccountAction"></button>
+          <div class="setting-row">
+            <div><h3>学习通</h3><p class="sub" id="studyAccount"></p></div>
+            <button class="btn" id="studyAccountAction"></button>
+          </div>
+          <div class="setting-row">
+            <div><h3>慧生活798</h3><p class="sub" id="waterAccount"></p></div>
+            <button class="btn" id="waterAccountAction"></button>
+          </div>
+        </section>
+        <section class="card pad">
+          <h2>应用设置</h2>
+          <div class="setting-row">
+            <label for="appTheme">外观</label>
+            <select id="appTheme">
+              <option value="system">跟随系统</option>
+              <option value="light">浅色</option>
+              <option value="dark">深色</option>
+            </select>
+          </div>
+          <div class="setting-row">
+            <div><h3>网页缓存</h3><p class="sub">保留本机待办、账号和课表。</p></div>
+            <button class="btn" id="clearWebCache">清理缓存</button>
+          </div>
         </section>
         <section class="card pad">
           <h2>酱菜通 · JiangCaiTong</h2>
           <p>江西财经大学非官方 Android 校园助手。</p>
           <p class="sub">基于航院通二次开发。MIT License · Copyright © 2026 Hobson</p>
           <p class="sub" id="appVersion"></p>
-          <button class="btn" id="clearWebCache">清理网页缓存</button>
         </section>
       </div>
     </main>
@@ -209,9 +219,36 @@
     </nav>
     <div class="sheet-mask" id="sheetMask" hidden>
       <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="detailTitle">
-        <button type="button" class="sheet-x" id="sheetClose" aria-label="关闭">×</button>
-        <h2 id="detailTitle"></h2>
-        <div id="detailBody"></div>
+        <header class="sheet-header"><h2 id="detailTitle"></h2><button type="button" class="sheet-x" id="sheetClose" aria-label="关闭">×</button></header>
+        <div class="sheet-body" id="detailBody"></div>
+      </section>
+    </div>
+    <div class="sheet-mask" id="todoEditor" hidden>
+      <section class="sheet todo-editor" role="dialog" aria-modal="true" aria-labelledby="todoEditorHeading">
+        <header class="sheet-header">
+          <h2 id="todoEditorHeading">编辑待办</h2>
+          <button class="sheet-x" id="todoCancel" type="button" aria-label="关闭">×</button>
+        </header>
+        <form id="todoEditForm" autocomplete="off">
+          <label for="todoEditTitle">标题</label>
+          <input id="todoEditTitle" maxlength="120" required>
+          <label for="todoNotes">备注</label>
+          <textarea id="todoNotes" rows="3" maxlength="1000"></textarea>
+          <label for="todoDue">截止日期</label>
+          <input id="todoDue" type="date">
+          <p class="sub status-note" data-tone="error" id="todoEditStatus" role="status"></p>
+          <div class="controls" id="todoEditActions">
+            <button class="btn danger" id="todoDelete" type="button">删除</button>
+            <button class="btn primary" type="submit">保存</button>
+          </div>
+          <div id="todoDeleteConfirm" hidden>
+            <p class="sub status-note" data-tone="warning">删除这项待办？</p>
+            <div class="controls">
+              <button class="btn" id="todoKeep" type="button">取消</button>
+              <button class="btn danger" id="todoConfirmDelete" type="button">确认删除</button>
+            </div>
+          </div>
+        </form>
       </section>
     </div>
     <div class="toast" id="toast" role="status" hidden></div>

@@ -449,6 +449,18 @@ public final class NativeBridge {
     }
 
     @JavascriptInterface
+    public boolean systemUiDark() {
+        return ((MainActivity) web.getContext()).systemUiDark();
+    }
+
+    @JavascriptInterface
+    public void setUiTheme(boolean dark) {
+        web.post(() -> {
+            if (!closed) ((MainActivity) web.getContext()).applyUiTheme(dark);
+        });
+    }
+
+    @JavascriptInterface
     public void clearWebCache() {
         web.post(() -> {
             if (!closed) web.clearCache(true);

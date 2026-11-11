@@ -73,7 +73,8 @@ public class MainActivity extends Activity {
         settings.setAllowContentAccess(false);
         settings.setSaveFormData(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-        settings.setUserAgentString(settings.getUserAgentString() + " JiangCaiTong/0.6.6");
+        settings.setUserAgentString(settings.getUserAgentString() + " JiangCaiTong/0.7.0");
+        if (android.os.Build.VERSION.SDK_INT >= 33) settings.setAlgorithmicDarkeningAllowed(false);
         bridge = new NativeBridge(web);
         web.addJavascriptInterface(bridge, "Android");
         web.setWebViewClient(new AssetClient());
@@ -160,10 +161,19 @@ public class MainActivity extends Activity {
     }
 
     private void applySystemBars() {
-        boolean dark = (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK)
+        applyUiTheme(systemUiDark());
+    }
+
+    boolean systemUiDark() {
+        return (getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK)
                 == Configuration.UI_MODE_NIGHT_YES;
-        getWindow().setStatusBarColor(Color.parseColor(dark ? "#101722" : "#edf6ff"));
-        getWindow().setNavigationBarColor(Color.parseColor(dark ? "#101722" : "#ffffff"));
+    }
+
+    void applyUiTheme(boolean dark) {
+        int background = Color.parseColor(dark ? "#121b17" : "#f3f6f4");
+        getWindow().setStatusBarColor(background);
+        getWindow().setNavigationBarColor(Color.parseColor(dark ? "#1c2922" : "#ffffff"));
+        if (web != null) web.setBackgroundColor(background);
         getWindow().getDecorView().setSystemUiVisibility(dark ? 0 :
                 View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
     }
@@ -171,7 +181,7 @@ public class MainActivity extends Activity {
     @Override
     public void onConfigurationChanged(Configuration configuration) {
         super.onConfigurationChanged(configuration);
-        applySystemBars();
+        if (web != null) web.evaluateJavascript("window.applyUiTheme && window.applyUiTheme()", null);
     }
 
     @Override
@@ -180,6 +190,7 @@ public class MainActivity extends Activity {
         boolean refreshAcademic = !academicReturning && !academicVisitActive;
         academicReturning = false;
         if (web != null) web.evaluateJavascript("window.refreshSession && window.refreshSession();"
+                + "window.applyUiTheme && window.applyUiTheme();"
                 + "window.resumeStudyUpdates && window.resumeStudyUpdates();"
                 + (refreshAcademic ? "window.resumeAcademicSync && window.resumeAcademicSync()" : ""), null);
     }

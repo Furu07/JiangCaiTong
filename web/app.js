@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.6.6';
+const APP_VERSION = '0.7.0';
 const $ = id => document.getElementById(id);
 const tabs = Array.from(document.querySelectorAll('[data-tab]'));
 const native = window.Android;
@@ -43,22 +43,31 @@ function toast(message) {
 }
 
 let previousFocus;
+function setOverlay(mask, open) {
+  mask.hidden = !open;
+  const modalOpen = Array.from(document.querySelectorAll('.sheet-mask')).some(item => !item.hidden);
+  document.querySelectorAll('.page, .tabbar').forEach(item => { item.inert = modalOpen; });
+}
+
 function showDetails(title, lines) {
   previousFocus = document.activeElement;
   $('detailTitle').textContent = title;
   empty($('detailBody'));
   lines.forEach(line => $('detailBody').appendChild(node('p', line)));
-  $('sheetMask').hidden = false;
+  setOverlay($('sheetMask'), true);
   $('sheetClose').focus();
 }
 
-function closeDetails() {
+function closeCourseDetails() {
   if ($('sheetMask').hidden) return false;
-  $('sheetMask').hidden = true;
-  if (previousFocus) previousFocus.focus();
+  setOverlay($('sheetMask'), false);
+  if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
   return true;
 }
-window.closeDetails = closeDetails;
+window.closeDetails = () => window.closeTodoEditor?.() || closeCourseDetails();
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && window.closeDetails()) event.preventDefault();
+});
 
 let portalPending = null;
 let recordPending = null;
@@ -89,6 +98,7 @@ const recordAdapters = { grades: AcademicRecords.grades(recordSource('grades')),
   exams: AcademicRecords.exams(recordSource('exams')) };
 const gradeTerms = AcademicRecords.gradeTerms(recordSource('grade-terms'));
 const recordTerms = {};
+const recordViews = {};
 let academicPanel = 'timetable';
 let recordRender = 0;
 let demoTerms = [];
@@ -104,10 +114,13 @@ function periodLabel(course) {
 
 function courseButton(course) {
   const button = node('button', null, 'course');
-  button.appendChild(node('span', course.name));
-  button.appendChild(node('small', periodLabel(course)));
+  button.setAttribute('aria-label', course.name + ' · ' + periodLabel(course));
+  button.appendChild(node('span', course.name, 'course-name'));
+  const shortPeriod = course.startPeriod + (course.endPeriod === course.startPeriod ? '' : '–' + course.endPeriod) + ' 节';
+  button.appendChild(node('small', shortPeriod));
   const location = [course.campus, course.building, course.location].filter(Boolean).join(' · ');
   button.appendChild(node('small', location || '地点待定', 'course-location'));
+  if (course.teacher) button.appendChild(node('small', course.teacher, 'course-teacher'));
   if (course.kind === 'moved') button.appendChild(node('small', '调课'));
   if (course.kind === 'special') button.appendChild(node('small', '特殊安排'));
   if (course.conflict) button.appendChild(node('small', '冲突', 'course-conflict'));
@@ -142,11 +155,16 @@ function renderSchedule() {
   }
   const grid = node('div', null, daily ? 'day-schedule card pad' : 'week-schedule card');
   const visibleDays = daily ? [day] : [1, 2, 3, 4, 5, 6, 7];
+  const today = new Date().toLocaleDateString('sv-SE');
   visibleDays.forEach(weekday => {
     const date = Academic.dayDate(schedule, week, weekday);
     const column = node('section', null, 'weekday');
-    column.appendChild(node('h2', days[weekday - 1], 'weekday-title'));
-    column.appendChild(node('p', (date.getUTCMonth() + 1) + '/' + date.getUTCDate(), 'date'));
+    const isToday = date.toISOString().slice(0, 10) === today;
+    const heading = node('header', null, 'weekday-head' + (isToday ? ' today' : ''));
+    if (isToday) heading.setAttribute('aria-current', 'date');
+    heading.append(node('h2', days[weekday - 1], 'weekday-title'),
+      node('p', (date.getUTCMonth() + 1) + '/' + date.getUTCDate(), 'date'));
+    column.appendChild(heading);
     const courses = Academic.coursesFor(schedule, week, weekday);
     courses.forEach(course => column.appendChild(courseButton(course)));
     if (!courses.length) column.appendChild(node('p', daily ? '当天没有课程' : '—', 'date'));
@@ -230,6 +248,8 @@ let studyAttempt = null;
 let studyBusy = false;
 let studyMessage = '';
 let showInactiveStudyCourses = false;
+let studyListState = [];
+const studyOpenSections = new Map();
 let studyForeground = true;
 let studyScanTimer;
 let studyRetryAt = 0;
@@ -247,6 +267,7 @@ function reconcileStudyCache() {
     selectedCourse = '';
     studyAttempt = null;
     showInactiveStudyCourses = false;
+    studyOpenSections.clear();
     studyManualQueue.clear();
     studyRetryAt = 0;
     studyMessage = scope ? '已接收学习通会话，请查询课程确认授权。' : '';
@@ -269,6 +290,7 @@ function clearStudyCache(remove = false) {
   selectedCourse = '';
   studyAttempt = null;
   showInactiveStudyCourses = false;
+  studyOpenSections.clear();
   studyManualQueue.clear();
   studyRetryAt = 0;
   if (!remove || !account) return;
@@ -283,6 +305,8 @@ function showCourseResults(course) {
   const key = courseKey(course);
   const entry = studyCache.details[key];
   const sections = studyAttempt && studyAttempt.key === key ? studyAttempt.sections : entry && entry.sections;
+  const open = studyOpenSections.get(key) || new Map();
+  studyOpenSections.set(key, open);
   const card = node('section', null, 'card pad');
   card.appendChild(node('h2', course.title || '课程详情'));
   const refresh = node('button', '刷新学习任务', 'btn');
@@ -305,18 +329,24 @@ function showCourseResults(course) {
     const state = section.error ? (section.cached ? ' · 旧缓存' : ' · 查询失败')
       : ' · ' + section.items.length + ' 项';
     group.appendChild(node('summary', section.title + state));
+    group.open = open.get(section.title) ?? (section.title === '作业' || !!section.error);
+    group.addEventListener('toggle', () => { open.set(section.title, group.open); });
     if (section.error) {
-      group.open = true;
-      group.appendChild(node('p', section.error, 'sub'));
+      const error = node('p', section.error, 'sub status-note');
+      error.dataset.tone = 'warning';
+      group.appendChild(error);
     }
     if (section.items && (section.at || entry)) {
       group.appendChild(node('p', '数据时间 · ' + time(section.at || entry.at), 'sub'));
     }
-    if (section.items && !section.items.length) group.appendChild(node('p', '暂无' + section.title, 'sub'));
-    (section.items || []).forEach(item => {
+    if (section.items && !section.items.length) group.appendChild(node('p', '暂无' + section.title, 'empty-state'));
+    const items = section.items || [];
+    const ordered = section.title === '作业'
+      ? [...items.filter(item => item.state === 'todo'), ...items.filter(item => item.state !== 'todo')] : items;
+    ordered.forEach(item => {
       const signed = item.kind === 'sign' && !item.status
         ? item.signed === true ? '已签' : item.signed === false ? '未签' : '签到状态未知' : '';
-      const status = [item.kindName, item.status || signed, item.left].filter(Boolean).join(' · ');
+      const status = [item.kindName, item.status || signed, studyDeadline(item)].filter(Boolean).join(' · ');
       group.appendChild(resultRow(item.title, status));
     });
     card.appendChild(group);
@@ -338,48 +368,141 @@ function resultRow(title, subtitle) {
   return row;
 }
 
+function studyDeadline(item) {
+  if (item.kind === 'notice') return '';
+  if (item.left) return item.left;
+  return item.kind === 'work' && Number.isFinite(item.endAt) && item.endAt > 0 ? '截止 ' + time(item.endAt * 1000) : '';
+}
+
+function pendingHomework(entry) {
+  return entry?.sections?.find(section => section.title === '作业')?.items
+    ?.filter(item => item.kind === 'work' && item.state === 'todo');
+}
+
+function openStudyCourse(course) {
+  selectedCourse = courseKey(course);
+  if (!studyCache.details[selectedCourse]) {
+    queryStudy(course);
+    return;
+  }
+  renderStudy();
+  $('studyDetails').scrollIntoView({ block: 'nearest' });
+}
+
+function sectionHeading(title, detail) {
+  const heading = node('header', null, 'section-title');
+  heading.appendChild(node('h2', title));
+  if (detail) heading.appendChild(node('p', detail, 'sub'));
+  return heading;
+}
+
+function renderStudyTasks(courses) {
+  const target = $('studyTasks');
+  const tasks = [];
+  let loaded = 0;
+  for (const course of courses) {
+    const work = pendingHomework(studyCache.details[courseKey(course)]);
+    if (!work) continue;
+    loaded++;
+    work.forEach(item => tasks.push({ course, item }));
+  }
+  if (!loaded) {
+    target.replaceChildren();
+    return;
+  }
+  const section = node('section');
+  section.appendChild(sectionHeading('待处理作业', '已读取 ' + loaded + ' 门课程'));
+  const list = node('div', null, 'card task-list');
+  tasks.sort((a, b) => (a.item.endAt || Infinity) - (b.item.endAt || Infinity));
+  if (!tasks.length) list.appendChild(node('p', '已读取的课程暂无待处理作业。', 'empty-state'));
+  function taskButton({ course, item }) {
+    const button = node('button', null, 'study-task');
+    button.type = 'button';
+    button.append(node('span', item.title, 'task-name'),
+      node('span', [course.title || '未命名课程', item.status, studyDeadline(item)].filter(Boolean).join(' · '), 'course-meta'));
+    button.addEventListener('click', () => openStudyCourse(course));
+    return button;
+  }
+  tasks.slice(0, 4).forEach(task => list.appendChild(taskButton(task)));
+  if (tasks.length > 4) {
+    const more = node('details', null, 'result-group study-hidden');
+    more.open = target.querySelector('details')?.open || false;
+    more.appendChild(node('summary', '其余 ' + (tasks.length - 4) + ' 项'));
+    tasks.slice(4).forEach(task => more.appendChild(taskButton(task)));
+    list.appendChild(more);
+  }
+  section.appendChild(list);
+  target.replaceChildren(section);
+}
+
 function renderStudy() {
   const linked = !!reconcileStudyCache();
+  $('studyLogin').hidden = linked;
   $('studyLogin').disabled = !native || studyBusy;
   $('studyRefresh').disabled = !linked || studyBusy;
+  $('studyRefresh').textContent = studyBusy ? '刷新中…' : '刷新课程';
   $('studyStatus').textContent = studyMessage || (linked
-    ? '已载入本机会话，请查询课程确认授权。' : '在超星官方页面完成登录后，点「完成登录并返回」。');
+    ? studyCache.at ? '学习通已连接 · ' + studyCache.courses.length + ' 门课程' : '学习通已连接，可刷新课程。'
+    : '登录后查看课程与任务。');
+  $('studyStatus').dataset.tone = /失败|过期|限制|未确认|未更新/.test(studyMessage) ? 'warning'
+    : linked && !studyBusy ? 'success' : '';
   const target = $('studyCourses');
-  empty(target);
+  const nextState = [studyCache.courses, studyCache.at, linked, studyBusy, selectedCourse, studyAttempt];
+  for (const course of studyCache.courses) {
+    const key = courseKey(course);
+    nextState.push(studyCache.details[key], studyCache.updates[key]);
+  }
+  if (nextState.length === studyListState.length && nextState.every((value, i) => value === studyListState[i])) return;
+  studyListState = nextState;
+  const scroll = $('page-study').querySelector('.scroll');
+  const scrollTop = scroll.scrollTop;
+  const focusKey = document.activeElement?.dataset.studyCourse;
+  const content = document.createDocumentFragment();
+  const active = studyCache.courses.filter(course => !StudyActivity.hiddenReason(studyCache.updates[courseKey(course)]));
+  renderStudyTasks(active);
   if (studyCache.at) {
-    const card = node('section', null, 'card pad');
-    const inactive = studyCache.courses.filter(course => StudyActivity.hiddenReason(studyCache.updates[courseKey(course)]));
-    const visible = studyCache.courses.length - inactive.length;
-    card.appendChild(node('h2', '课程 · ' + visible + ' 门'));
-    card.appendChild(node('p', '本机结果 · ' + time(studyCache.at), 'sub'));
-    if (!studyCache.courses.length) card.appendChild(node('p', '没有课程记录', 'sub'));
-    const folded = node('details', null, 'result-group');
+    const card = node('section', null, 'card study-course-list');
+    const hiddenCount = studyCache.courses.length - active.length;
+    content.appendChild(sectionHeading('活跃课程', active.length + ' 门'));
+    if (!active.length) card.appendChild(node('p', hiddenCount ? '课程可在下方的隐藏列表查看。' : '暂无课程记录。', 'empty-state'));
+    const folded = node('details', null, 'card study-hidden result-group');
     folded.open = showInactiveStudyCourses;
-    folded.appendChild(node('summary', '已隐藏课程 · ' + inactive.length + ' 门'));
+    folded.appendChild(node('summary', '已隐藏课程 · ' + hiddenCount + ' 门'));
     folded.addEventListener('toggle', () => { showInactiveStudyCourses = folded.open; });
     studyCache.courses.forEach(course => {
       const key = courseKey(course);
-      const button = node('button', (course.title || '未命名课程') +
-        (course.alias && course.alias !== course.title ? ' · ' + course.alias : ''), 'course-list-item');
-      button.disabled = studyBusy || (!linked && !studyCache.details[key]);
+      const button = node('button', null, 'course-list-item');
+      button.type = 'button';
+      button.dataset.studyCourse = key;
+      const entry = studyCache.details[key];
+      button.disabled = !entry && (!linked || studyBusy);
       button.setAttribute('aria-pressed', String(selectedCourse === key));
-      button.addEventListener('click', () => {
-        selectedCourse = key;
-        if (!studyCache.details[key]) queryStudy(course);
-        else {
-          renderStudy();
-          $('studyDetails').scrollIntoView({ block: 'nearest' });
-        }
-      });
+      button.addEventListener('click', () => openStudyCourse(course));
+      button.appendChild(node('span', course.title || '未命名课程', 'course-name'));
       const activity = studyCache.updates[key];
       const reason = StudyActivity.hiddenReason(activity);
+      const meta = node('span', null, 'course-meta');
+      const pending = pendingHomework(entry);
+      if (pending?.length) meta.appendChild(node('span', pending.length + ' 项待交', 'badge'));
+      if (course.alias && course.alias !== course.title) meta.appendChild(node('span', course.alias));
+      if (activity?.alwaysVisible) meta.appendChild(node('span', '始终显示', 'badge muted'));
+      else if (!reason && !activity?.reliable) {
+        const label = activity?.lastSuccessfulCheckAt ? '检查待确认 · 保留上次结果' : '活跃度观察中';
+        meta.appendChild(node('span', label, 'badge muted'));
+      }
+      const publishedAt = Math.max(activity?.notices?.publishedAt || 0, activity?.homework?.publishedAt || 0);
+      if (!reason && publishedAt) meta.appendChild(node('span', '最近发布 ' + time(publishedAt)));
+      if (meta.childNodes.length) button.appendChild(meta);
       if (!reason) {
         card.appendChild(button);
         return;
       }
       const row = node('div', null, 'result-row');
-      const publishedAt = Math.max(activity.notices?.publishedAt || 0, activity.homework?.publishedAt || 0);
       row.append(button, node('p', reason + (publishedAt ? ' · 最近发布 ' + time(publishedAt) : ''), 'sub'));
+      if (activity.checkedAt) {
+        const prefix = activity.reliable ? '最近检查 ' : '检查待确认 · ';
+        row.appendChild(node('p', prefix + time(activity.checkedAt), 'study-check-time'));
+      }
       const restore = node('button', '恢复显示', 'btn');
       restore.addEventListener('click', () => changeStudyVisibility(key, 'restore'));
       const always = node('button', '始终显示', 'btn');
@@ -389,12 +512,18 @@ function renderStudy() {
       row.appendChild(controls);
       folded.appendChild(row);
     });
-    if (inactive.length) card.appendChild(folded);
-    target.appendChild(card);
+    content.appendChild(card);
+    if (hiddenCount) content.appendChild(folded);
   }
+  target.replaceChildren(content);
   const current = studyCache.courses.find(course => courseKey(course) === selectedCourse);
   if (current) showCourseResults(current);
   else empty($('studyDetails'));
+  scroll.scrollTop = scrollTop;
+  if (focusKey) {
+    Array.from(target.querySelectorAll('[data-study-course]')).find(item => item.dataset.studyCourse === focusKey)
+      ?.focus({ preventScroll: true });
+  }
 }
 
 function openStudyLogin() {
@@ -545,10 +674,12 @@ function renderWater() {
   const connected = state.linked && !waterExpired;
   const canStart = Water.loginConfigured();
   $('waterStatus').textContent = waterMessage || (connected
-    ? '已载入饮水服务登录状态。' : !canStart && native
-      ? '本构建缺少经授权的 798 用水登录签名配置，暂不可申请短信。' : state.broken
-      ? '本机登录状态已失效，请重新登录。'
-      : '使用手机号、图形验证码和短信验证码登录。');
+    ? '饮水服务已登录。' : !canStart && native
+      ? '应用内短信登录暂不可用，缺少授权配置。' : state.broken
+      ? '登录已失效，请重新登录。'
+      : '登录后查看余额和消费记录。');
+  $('waterStatus').dataset.tone = /失败|错误|失效|不可用/.test($('waterStatus').textContent) ? 'warning'
+    : connected && !waterBusy ? 'success' : '';
   $('waterLoginOpen').hidden = connected || !canStart;
   $('waterOfficial').hidden = $('waterExternalHelp').hidden = !native || !native.openOfficialWater;
   $('waterRefresh').hidden = !connected;
@@ -723,12 +854,12 @@ function queryBills(more) {
 function renderAccounts() {
   const cx = native && native.cxHasLogin();
   const water = native ? Water.state() : { linked: false };
-  $('studyAccount').textContent = '学习通 · ' + (cx ? '已载入本机登录状态' : '未连接');
-  $('studyAccountAction').textContent = cx ? '退出学习通' : '前往学习通';
+  $('studyAccount').textContent = cx ? '已登录' : '未连接';
+  $('studyAccountAction').textContent = cx ? '退出' : '前往登录';
   $('studyAccountAction').disabled = studyBusy;
-  $('waterAccount').textContent = '慧生活798 · ' +
-    (waterExpired || water.broken ? '会话已失效' : water.linked ? '本机已保存会话' : '未连接');
-  $('waterAccountAction').textContent = water.linked || water.broken ? '退出慧生活798' : '前往慧生活798';
+  $('waterAccount').textContent = waterExpired || water.broken ? '会话已失效'
+    : water.linked ? '已登录' : '未连接';
+  $('waterAccountAction').textContent = water.linked || water.broken ? '退出' : '前往服务';
   $('waterAccountAction').disabled = waterBusy;
   $('clearWebCache').disabled = !native;
 }
@@ -739,6 +870,27 @@ function refreshSession() {
   renderAccounts();
 }
 window.refreshSession = refreshSession;
+
+const uiTheme = $('appTheme');
+const themeMedia = matchMedia('(prefers-color-scheme: dark)');
+try {
+  const saved = localStorage.getItem('jct.theme.v1');
+  if (['system', 'light', 'dark'].includes(saved)) uiTheme.value = saved;
+} catch (_) { /* Use the system setting when storage is unavailable. */ }
+function applyUiTheme() {
+  const dark = uiTheme.value === 'dark' || (uiTheme.value === 'system'
+    && (native?.systemUiDark?.() ?? themeMedia.matches));
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+  native?.setUiTheme?.(dark);
+}
+window.applyUiTheme = applyUiTheme;
+uiTheme.addEventListener('change', () => {
+  try { localStorage.setItem('jct.theme.v1', uiTheme.value); }
+  catch (_) { toast('外观设置仅本次有效'); }
+  applyUiTheme();
+});
+themeMedia.addEventListener?.('change', applyUiTheme);
+applyUiTheme();
 
 $('studyAccountAction').addEventListener('click', () => {
   if (!native || !native.cxHasLogin()) {
@@ -811,9 +963,9 @@ $('waterForm').addEventListener('submit', loginWater);
 $('waterRefresh').addEventListener('click', refreshWater);
 $('billRefresh').addEventListener('click', () => queryBills(false));
 $('billMore').addEventListener('click', () => queryBills(true));
-$('sheetClose').addEventListener('click', closeDetails);
+$('sheetClose').addEventListener('click', closeCourseDetails);
 $('sheetMask').addEventListener('click', event => {
-  if (event.target === $('sheetMask')) closeDetails();
+  if (event.target === $('sheetMask')) closeCourseDetails();
 });
 $('clearWebCache').addEventListener('click', () => {
   native.clearWebCache();
@@ -851,6 +1003,10 @@ function showSchoolStatus() {
 }
 
 function selectAcademicPanel(panel) {
+  const previous = recordViews[academicPanel];
+  if (previous && $('recordResults').firstElementChild === previous.node) {
+    previous.scrollTop = $('academic-records').scrollTop;
+  }
   academicPanel = panel;
   const timetable = panel === 'timetable';
   document.querySelectorAll('[data-academic]').forEach(button => {
@@ -894,7 +1050,16 @@ async function renderAcademicRecords(force = false) {
     format: '无法识别教务数据格式。',
     'account-changed': '教务账号已切换，请重新查询。'
   };
-  empty(results);
+  status.dataset.tone = '';
+  const previous = recordViews[panel];
+  const reuse = previous && previous.account === scope.accountKey
+    && ['authorized', 'unverified'].includes(scope.state)
+    && (!recordTerms[panel] || recordTerms[panel] === previous.term);
+  if (!reuse) empty(results);
+  else if (results.firstElementChild !== previous.node) {
+    results.replaceChildren(previous.node);
+    $('academic-records').scrollTop = previous.scrollTop;
+  }
   let options = scope.terms;
   let catalog;
   if (grades) {
@@ -916,6 +1081,7 @@ async function renderAcademicRecords(force = false) {
   if (!options.length) term.add(new Option(grades ? '暂无可选成绩学期' : '绑定后显示教务学期', ''));
   term.disabled = !options.length;
   const selectedTerm = term.value;
+  if (reuse && previous.term !== selectedTerm) empty(results);
   if (!grades || selectedTerm) status.textContent = adapter.available ? '正在查询…' : messages.unavailable;
   const data = grades && !selectedTerm ? catalog : await adapter.load(scope, selectedTerm, force);
   if (!isCurrent()) return;
@@ -931,35 +1097,58 @@ async function renderAcademicRecords(force = false) {
   $('recordBack').hidden = !needsBinding;
   $('recordRefresh').disabled = (!grades && !selectedTerm) || needsBinding;
   const displayed = data.cached || data;
-  const gradeCount = grades && displayed.state === 'ready' ? selectedTerm + ' · 有效成绩 ' + displayed.rows.length + ' 条' : '';
+  const gradeCount = grades && displayed.state === 'ready' ? displayed.rows.length + ' 门有效成绩' : '';
   const catalogError = catalog?.cached ? '成绩学期更新失败 · ' + messages[catalog.state] : '';
   status.textContent = [catalogError, messages[data.state], gradeCount,
-    displayed.at ? '更新于 ' + time(displayed.at) : ''].filter(Boolean).join(' ');
-  if (displayed.state !== 'ready') return;
-  const card = node('section', null, 'card pad');
+    displayed.at ? '更新于 ' + time(displayed.at) : ''].filter(Boolean).join(' · ');
+  status.dataset.tone = catalogError || ['expired', 'term', 'busy'].includes(data.state) ? 'warning'
+    : ['network', 'timeout', 'denied', 'format'].includes(data.state) ? 'error' : '';
+  if (displayed.state !== 'ready') {
+    empty(results);
+    delete recordViews[panel];
+    return;
+  }
+  if (reuse && previous.term === selectedTerm && previous.rows === displayed.rows) return;
+  const scrollTop = reuse && previous.term === selectedTerm ? $('academic-records').scrollTop : 0;
+  const card = node('div');
+  let group = node('section', null, 'card pad');
+  if (grades) card.appendChild(group);
   const rows = displayed.rows.slice();
   const today = new Date().toLocaleDateString('sv-SE');
   const upcoming = item => !!item.date && item.date >= today;
   if (!grades) rows.sort((a, b) => Number(upcoming(b)) - Number(upcoming(a))
     || (a.date || '9999').localeCompare(b.date || '9999') || a.start.localeCompare(b.start));
-  let previousDate;
+  let previousDate = null;
   rows.forEach(item => {
-    if (!grades && item.date !== previousDate) {
-      card.appendChild(node('h2', upcoming(item) ? '即将考试 · ' + item.date : item.date || '日期待定'));
-      previousDate = item.date;
+    const date = item.date || '';
+    if (!grades && date !== previousDate) {
+      group = node('section', null, 'card pad exam-day');
+      group.appendChild(node('h2', upcoming(item) ? '即将考试 · ' + item.date : item.date || '日期待定'));
+      card.appendChild(group);
+      previousDate = date;
     }
-    const row = node('article', null, 'result-row');
-    row.appendChild(node('strong', item.name));
+    const row = node('article', null, 'result-row ' + (grades ? 'grade-row' : 'exam-row'));
+    const summary = node('div');
+    summary.appendChild(node('strong', item.name, 'course-name'));
     const details = grades
-      ? [item.grade ? '成绩 ' + item.grade : '成绩未提供', item.credits && '学分 ' + item.credits,
-        item.earnedCredits && '获得学分 ' + item.earnedCredits, item.gpa && '绩点 ' + item.gpa,
+      ? [item.earnedCredits && '获得学分 ' + item.earnedCredits, item.gpa && '绩点 ' + item.gpa,
         item.creditPoints && '学分绩点 ' + item.creditPoints, item.category, item.nature, item.assessment, item.note]
-      : [item.timeText || [item.start, item.end].filter(Boolean).join('–'),
-        [item.campus, item.building, item.room].filter(Boolean).join(' · '), item.seat && '座位 ' + item.seat, item.mode, item.status];
-    row.appendChild(node('p', details.filter(Boolean).join(' · '), 'sub'));
-    card.appendChild(row);
+      : [[item.campus, item.building, item.room].filter(Boolean).join(' · '),
+        item.seat && '座位 ' + item.seat, item.mode, item.status];
+    summary.appendChild(node('p', details.filter(Boolean).join(' · '), 'sub'));
+    if (grades) {
+      const grade = node('div', null, 'grade-value');
+      grade.appendChild(node('strong', item.grade || '未提供'));
+      if (item.credits) grade.appendChild(node('small', item.credits + ' 学分'));
+      row.append(summary, grade);
+    } else {
+      row.append(node('span', item.timeText || [item.start, item.end].filter(Boolean).join('–') || '时间待定', 'exam-time'), summary);
+    }
+    group.appendChild(row);
   });
-  results.appendChild(card);
+  results.replaceChildren(card);
+  $('academic-records').scrollTop = scrollTop;
+  recordViews[panel] = { account: scope.accountKey, term: selectedTerm, rows: displayed.rows, node: card, scrollTop };
 }
 
 document.querySelectorAll('[data-academic]').forEach(button => {
