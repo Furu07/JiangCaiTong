@@ -1,9 +1,10 @@
 'use strict';
 
-const APP_VERSION = '0.7.0';
+const APP_VERSION = '0.8.0';
 const $ = id => document.getElementById(id);
 const tabs = Array.from(document.querySelectorAll('[data-tab]'));
 const native = window.Android;
+const zhuli = Zhuli.create(native);
 const days = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 
 function node(tag, text, className) {
@@ -864,10 +865,30 @@ function renderAccounts() {
   $('clearWebCache').disabled = !native;
 }
 
+function renderZhuli() {
+  const status = zhuli.status();
+  const button = $('zhuliOpen');
+  button.hidden = status === 'unavailable';
+  button.textContent = status === 'external-store' ? '在应用宝查看' : '打开官方 App';
+  const label = status === 'external-app' ? '外部服务 · 账号由住理生活管理'
+    : status === 'external-store' ? '外部服务 · 尚未安装住理生活' : '当前环境无法打开住理生活。';
+  if ($('zhuliStatus').textContent !== label) $('zhuliStatus').textContent = label;
+}
+
+function selectLifeService(service) {
+  document.querySelectorAll('[data-life]').forEach(button => {
+    const active = button.dataset.life === service;
+    button.setAttribute('aria-pressed', String(active));
+    $(button.getAttribute('aria-controls')).hidden = !active;
+  });
+  if (service === 'zhuli') renderZhuli();
+}
+
 function refreshSession() {
   renderStudy();
   renderWater();
   renderAccounts();
+  if (!$('page-life').hidden && !$('life-zhuli').hidden) renderZhuli();
 }
 window.refreshSession = refreshSession;
 
@@ -912,6 +933,7 @@ $('studyAccountAction').addEventListener('click', () => {
 $('waterAccountAction').addEventListener('click', () => {
   const state = native && Water.state();
   if (!state || (!state.linked && !state.broken)) {
+    selectLifeService('water');
     select('life');
     return;
   }
@@ -929,6 +951,12 @@ $('waterAccountAction').addEventListener('click', () => {
 });
 
 tabs.forEach(button => button.addEventListener('click', () => select(button.dataset.tab)));
+document.querySelectorAll('[data-life]').forEach(button => {
+  button.addEventListener('click', () => selectLifeService(button.dataset.life));
+});
+$('zhuliOpen').addEventListener('click', () => {
+  if (!zhuli.open()) toast('无法打开住理生活，请在应用商店搜索。');
+});
 $('studyLogin').addEventListener('click', openStudyLogin);
 $('studyRefresh').addEventListener('click', () => queryStudy(null));
 $('waterLoginOpen').addEventListener('click', showWaterForm);

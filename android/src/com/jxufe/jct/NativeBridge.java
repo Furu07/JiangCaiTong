@@ -30,6 +30,8 @@ public final class NativeBridge {
     private static final String WATER_API = "/api/v1";
     private static final String WATER_OFFICIAL_PACKAGE = "com.cloudora.android";
     private static final String WATER_STORE = "https://app.mi.com/details?id=" + WATER_OFFICIAL_PACKAGE;
+    private static final String ZHULI_OFFICIAL_PACKAGE = "com.whxinna.userplatform";
+    private static final String ZHULI_STORE = "https://sj.qq.com/appdetail/" + ZHULI_OFFICIAL_PACKAGE;
     private static final int MAX_RESPONSE = 4 * 1024 * 1024;
     private static final String UA = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 "
             + "(KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36";
@@ -299,21 +301,35 @@ public final class NativeBridge {
 
     @JavascriptInterface
     public void openOfficialWater() {
+        openOfficialApp(WATER_OFFICIAL_PACKAGE, WATER_STORE, "请在应用商店搜索长沙云多啦发布的慧生活798");
+    }
+
+    @JavascriptInterface
+    public boolean zhuliAppAvailable() {
+        return !closed && web.getContext().getPackageManager().getLaunchIntentForPackage(ZHULI_OFFICIAL_PACKAGE) != null;
+    }
+
+    @JavascriptInterface
+    public void openOfficialZhuli() {
+        openOfficialApp(ZHULI_OFFICIAL_PACKAGE, ZHULI_STORE, "请在应用商店搜索武汉辛纳发布的住理生活");
+    }
+
+    private void openOfficialApp(String packageName, String store, String unavailableMessage) {
         web.post(() -> {
             if (closed) return;
             android.content.Context context = web.getContext();
-            Intent launch = context.getPackageManager().getLaunchIntentForPackage(WATER_OFFICIAL_PACKAGE);
-            if (launch != null) {
-                try {
+            try {
+                Intent launch = context.getPackageManager().getLaunchIntentForPackage(packageName);
+                if (launch != null) {
                     context.startActivity(launch);
                     return;
-                } catch (ActivityNotFoundException | SecurityException ignored) { }
-            }
+                }
+            } catch (ActivityNotFoundException | SecurityException ignored) { }
             try {
-                context.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(WATER_STORE))
+                context.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(store))
                         .addCategory(Intent.CATEGORY_BROWSABLE));
             } catch (ActivityNotFoundException | SecurityException error) {
-                Toast.makeText(context, "请在应用商店搜索长沙云多啦发布的慧生活798", Toast.LENGTH_SHORT).show();
+                Toast.makeText(context, unavailableMessage, Toast.LENGTH_SHORT).show();
             }
         });
     }

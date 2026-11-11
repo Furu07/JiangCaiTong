@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-当前构建为 0.7.0 Debug。Android 9 及以上支持独立教务授权和后台查询。会话失效时保留已有课表，由用户主动重新绑定。生活页提供官方慧生活798的外部入口。
+当前构建为 0.8.0 Debug。Android 9 及以上支持独立教务授权和后台查询。会话失效时保留已有课表，由用户主动重新绑定。
 
 | 入口 | 已实现 | 验证范围 |
 | --- | --- | --- |
@@ -12,6 +12,7 @@
 | 学习 | 学习通官方登录窗口、课程列表、按课程查询作业、考试和活动。可管理超过 30 天未发现更新的课程，隐藏课程也会参加复查 | MuMu 用现有授权验证了只读数据来源，隐藏、恢复及账号隔离通过定向测试 |
 | 待办 | 离线新增、编辑、删除、完成状态、筛选、备注和截止日期 | 仅保存在本机，无须绑定服务账号 |
 | 生活 | 官方慧生活798外部入口，已有有效会话的余额、设备与消费记录查询 | 原生短信登录需要服务方授权配置。旧版登录业务码 `-1` 的根因未确认 |
+| 生活 | 住理生活校园洗浴，提供官方 Android App 外部入口 | MuMu 已确认麦庐园项目。账号在官方 App 内管理，第三方数据接口待确认 |
 | 我的 | 服务账号状态、退出、外观、网页缓存清理和应用信息 | Android 运行检查 |
 
 ## 构建
@@ -22,10 +23,10 @@
 py -3.12 android/build_apk.py
 ```
 
-脚本从 `ANDROID_HOME`、`ANDROID_SDK_ROOT` 或系统默认位置查找 Android SDK，从 `JAVA_HOME` 或 `PATH` 查找 JDK。首次构建会生成独立的本地 Debug 签名密钥。输出为 `android/dist/JiangCaiTong-0.7.0-debug.apk`。安装到已连接且已授权的测试设备可执行以下命令。
+脚本从 `ANDROID_HOME`、`ANDROID_SDK_ROOT` 或系统默认位置查找 Android SDK，从 `JAVA_HOME` 或 `PATH` 查找 JDK。首次构建会生成独立的本地 Debug 签名密钥。输出为 `android/dist/JiangCaiTong-0.8.0-debug.apk`。安装到已连接且已授权的测试设备可执行以下命令。
 
 ```powershell
-adb install -r android/dist/JiangCaiTong-0.7.0-debug.apk
+adb install -r android/dist/JiangCaiTong-0.8.0-debug.apk
 ```
 
 ## 源码

@@ -14,6 +14,7 @@
   <script defer src="learning.js"></script>
   <script defer src="study-activity.js"></script>
   <script defer src="water.js"></script>
+  <script defer src="zhuli.js"></script>
   <script defer src="academic-records.js"></script>
   <script defer src="todo.js"></script>
   <script defer src="app.js"></script>
@@ -128,7 +129,11 @@
     </main>
     <main class="page" id="page-life" hidden>
       <header class="pagehead"><h1>生活</h1></header>
-      <div class="scroll">
+      <nav class="segments life-segments" aria-label="生活服务">
+        <button class="btn" type="button" data-life="water" aria-controls="life-water" aria-pressed="true">校园饮水</button>
+        <button class="btn" type="button" data-life="zhuli" aria-controls="life-zhuli" aria-pressed="false">校园洗浴</button>
+      </nav>
+      <div class="scroll" id="life-water">
         <div class="card pad">
           <h2>慧生活798</h2>
           <p class="sub status-note" id="waterStatus" role="status"></p>
@@ -171,6 +176,17 @@
             </div>
           </section>
         </div>
+      </div>
+      <div class="scroll" id="life-zhuli" hidden>
+        <section class="card pad">
+          <h2>住理生活</h2>
+          <p class="sub status-note" id="zhuliStatus" role="status"></p>
+          <p class="sub">已核实项目 · 江西财经大学麦庐园校区洗浴、直饮水项目</p>
+          <p class="sub">请在官方 App 登录并查看校园项目、余额、洗浴设备和使用记录。</p>
+          <div class="controls">
+            <button class="btn primary" type="button" id="zhuliOpen" hidden>打开官方 App</button>
+          </div>
+        </section>
       </div>
     </main>
     <main class="page" id="page-me" hidden>

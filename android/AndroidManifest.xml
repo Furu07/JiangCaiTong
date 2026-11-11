@@ -4,6 +4,7 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <queries>
         <package android:name="com.cloudora.android" />
+        <package android:name="com.whxinna.userplatform" />
     </queries>
     <application android:name=".App" android:label="@string/app_name"
         android:icon="@drawable/ic_launcher" android:allowBackup="false"
