@@ -1,6 +1,6 @@
 """Build a locally signed Debug APK with Android SDK command-line tools."""
 from pathlib import Path
-import base64
+import json
 import os
 import re
 import shutil
@@ -10,8 +10,8 @@ import zipfile
 
 ANDROID = Path(__file__).resolve().parent
 ROOT = ANDROID.parent
-VERSION = "0.8.4"
-VERSION_CODE = 29
+VERSION = "0.8.8"
+VERSION_CODE = 33
 MIN_SDK = 26
 TARGET_SDK = 33
 BUILD_TOOLS = "35.0.0"
@@ -70,11 +70,15 @@ def main():
     app = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
     if not re.search(r"^const APP_VERSION = '" + re.escape(VERSION) + r"';$", app, re.M):
         raise SystemExit("web/app.js 的版本与 Android 构建配置不一致。")
-    salt = os.environ.get("JCT_WATER_APP_SIGN_SALT", "")
-    if salt and (salt != salt.strip() or not salt.isprintable() or len(salt.encode("utf-8")) > 256
-                 or salt.lower() in {"your_app_sign_salt_here", "your_salt_here", "test-salt"}
-                 or re.fullmatch(r"(?:[A-Z][a-z]){13}\d+", salt)):
-        raise SystemExit("JCT_WATER_APP_SIGN_SALT 格式无效或为示例值。")
+    # Use the authorized local reference. Only the bundled asset gets the value.
+    water_source = ROOT / "hangyuantong-main" / "web" / "native.js"
+    salt = ""
+    if water_source.is_file():
+        match = re.search(r"""^\s*SALT_APP:\s*(['"])([^'"\r\n]+)\1\s*,""",
+                          water_source.read_text(encoding="utf-8"), re.M)
+        if not match:
+            raise SystemExit("航院通本地参考源码缺少 WATER.SALT_APP 定义。")
+        salt = match.group(2)
 
     # Keep SDK/JDK temporary paths ASCII on Windows where aapt2 may reject Unicode paths.
     with tempfile.TemporaryDirectory(prefix="jct-apk-") as temp:
@@ -88,12 +92,12 @@ def main():
         classes = build / "classes"
         generated.mkdir()
         classes.mkdir()
-        package = generated / "com" / "jxufe" / "jct"
-        package.mkdir(parents=True)
-        encoded = base64.b64encode(salt.encode("utf-8")).decode("ascii")
-        (package / "WaterLoginConfig.java").write_text(
-            'package com.jxufe.jct;\nfinal class WaterLoginConfig {\n'
-            f'    static final String SALT_BASE64 = "{encoded}";\n' '}\n', encoding="ascii")
+        water_asset = assets / "web" / "water.js"
+        source = water_asset.read_text(encoding="utf-8")
+        marker = '/* local authorized build */ ""'
+        if source.count(marker) != 1:
+            raise SystemExit("798 本地构建标记缺失或重复。")
+        water_asset.write_text(source.replace(marker, json.dumps(salt)), encoding="utf-8")
 
         compiled = build / "resources.zip"
         raw = build / "resources.apk"

@@ -64,6 +64,7 @@ public class MainActivity extends Activity {
         super.onCreate(state);
         academicVisitActive = state != null && state.getBoolean("academicVisitActive");
         Store.sweep(this);
+        WaterHttp.installCookies();
         web = new WebView(this);
         setContentView(web);
         WebSettings settings = web.getSettings();
@@ -73,7 +74,7 @@ public class MainActivity extends Activity {
         settings.setAllowContentAccess(false);
         settings.setSaveFormData(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-        settings.setUserAgentString(settings.getUserAgentString() + " JiangCaiTong/0.8.4");
+        settings.setUserAgentString(settings.getUserAgentString() + " JiangCaiTong/0.8.8");
         if (android.os.Build.VERSION.SDK_INT >= 33) settings.setAlgorithmicDarkeningAllowed(false);
         bridge = new NativeBridge(web);
         web.addJavascriptInterface(bridge, "Android");

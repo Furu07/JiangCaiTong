@@ -160,11 +160,6 @@
               <button class="btn" type="button" id="waterLoginCancel">收起</button>
             </div>
           </form>
-          <details id="waterDiagnostic" hidden>
-            <summary>798 脱敏诊断（Debug）</summary>
-            <p class="sub">显示用水通道配置及本次运行的脱敏状态，不显示手机号、验证码或会话内容。</p>
-            <pre id="waterDiagnosticRows" class="diagnostic-rows"></pre>
-          </details>
         </div>
         <div id="waterResults" hidden>
           <section class="card pad"><h2>余额</h2><p id="balance" class="value">—</p></section>
@@ -173,6 +168,11 @@
             <p class="sub" id="deviceStatus"></p>
             <div id="devices"></div>
             <p class="sub status-note" id="waterSelected" role="status"></p>
+            <div class="controls">
+              <button class="btn primary" type="button" id="waterStart" hidden>开始用水</button>
+              <button class="btn primary" type="button" id="waterStop" hidden>结束用水</button>
+              <button class="btn" type="button" id="waterDismissUse" hidden>关闭操作提示</button>
+            </div>
           </section>
           <section class="card pad">
             <h2>消费记录</h2>

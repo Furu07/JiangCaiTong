@@ -13,7 +13,6 @@ import org.json.JSONObject;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -26,8 +25,6 @@ import java.util.concurrent.Executors;
 
 /** Transport and local storage for the bundled assets. Remote pages have no bridge. */
 public final class NativeBridge {
-    private static final String WATER_HOST = "i.ilife798.com";
-    private static final String WATER_API = "/api/v1";
     private static final String WATER_OFFICIAL_PACKAGE = "com.cloudora.android";
     private static final String WATER_STORE = "https://app.mi.com/details?id=" + WATER_OFFICIAL_PACKAGE;
     private static final String ZHULI_OFFICIAL_PACKAGE = "com.whxinna.userplatform";
@@ -38,9 +35,6 @@ public final class NativeBridge {
 
     private final WebView web;
     private final ExecutorService pool = Executors.newSingleThreadExecutor();
-    // Only accessed by the serial request executor. Never persisted or shared with Chaoxing.
-    private String waterAttempt = "";
-    private java.net.CookieManager waterLoginCookies;
     private volatile boolean closed;
     private volatile boolean clearingWebCookies;
 
@@ -49,7 +43,7 @@ public final class NativeBridge {
     }
 
     @JavascriptInterface
-    public void req2(int id, String method, String url, String body, String referer, String headers, String studyScope, String attempt) {
+    public void req2(int id, String method, String url, String body, String referer, String headers, String studyScope) {
         if (closed) return;
         boolean study = isChaoxing(Uri.parse(url));
         java.net.CookieManager studyCookies = study ? CxNet.cookieJar(studyScope) : null;
@@ -57,9 +51,12 @@ public final class NativeBridge {
             JSONObject result;
             try {
                 URL target = new URL(url);
-                java.net.CookieManager waterCookies = waterLoginJar(method, target, attempt);
-                result = study && !CxNet.isCurrent(studyCookies) ? failure(401)
-                        : request(method, target, body, referer, headers, studyCookies, waterCookies);
+                if (study) {
+                    result = CxNet.isCurrent(studyCookies)
+                            ? request(method, target, referer, headers, studyCookies) : failure(401);
+                } else {
+                    result = WaterHttp.request(method, target, body, headers, debugDiagnosticsEnabled());
+                }
             } catch (Exception e) {
                 result = failure(0);
                 if (debugDiagnosticsEnabled()) {
@@ -82,42 +79,12 @@ public final class NativeBridge {
                 & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0;
     }
 
-    @JavascriptInterface
-    public void clearWaterAttempt(String attempt) {
-        if (closed) return;
-        pool.execute(() -> {
-            if (waterAttempt.equals(attempt)) {
-                waterAttempt = "";
-                waterLoginCookies = null;
-            }
-        });
-    }
-
     private static String exceptionKind(Exception error) {
         if (error instanceof java.net.SocketTimeoutException) return "Timeout";
         if (error instanceof javax.net.ssl.SSLException) return "TLS";
         if (error instanceof SecurityException) return "Policy";
         if (error instanceof IOException) return "IO";
         return "Other";
-    }
-
-    private java.net.CookieManager waterLoginJar(String method, URL url, String attempt) {
-        Uri uri = Uri.parse(url.toString());
-        if (!"POST".equals(method) || !isHttps(uri) || !WATER_HOST.equals(uri.getHost())) return null;
-        String path = uri.getPath();
-        if (((WATER_API + "/acc/login/code").equals(path) || (WATER_API + "/acc/login").equals(path))
-                && !waterLoginConfigured()) throw new SecurityException("Water login configuration unavailable");
-        if ((WATER_API + "/acc/login/code").equals(path)) {
-            if (attempt == null || !attempt.matches("[A-Za-z0-9]{10}")) throw new SecurityException("Missing SMS attempt");
-            waterAttempt = attempt;
-            waterLoginCookies = new java.net.CookieManager(null, java.net.CookiePolicy.ACCEPT_ORIGINAL_SERVER);
-            return waterLoginCookies;
-        }
-        if ((WATER_API + "/acc/login").equals(path)) {
-            if (waterLoginCookies == null || !waterAttempt.equals(attempt)) throw new SecurityException("SMS attempt changed");
-            return waterLoginCookies;
-        }
-        return null;
     }
 
     private static JSONObject failure(int status) {
@@ -135,8 +102,7 @@ public final class NativeBridge {
     }
 
     static boolean isWaterCaptcha(Uri url) {
-        return isHttps(url) && WATER_HOST.equals(url.getHost())
-                && (WATER_API + "/captcha/").equals(url.getPath());
+        return WaterHttp.isCaptcha(url);
     }
 
     private static boolean isHttps(Uri url) {
@@ -146,35 +112,14 @@ public final class NativeBridge {
 
     private static boolean allowed(String method, URL url) {
         Uri uri = Uri.parse(url.toString());
-        if (isChaoxing(uri)) return CxNet.isHost(uri.getHost()) && "GET".equals(method);
-        if (!isHttps(uri) || !WATER_HOST.equals(uri.getHost())) return false;
-        String path = url.getPath();
-        if ("GET".equals(method)) {
-            return (WATER_API + "/acc/wallet/owner").equals(path)
-                    || (WATER_API + "/acc/view-info").equals(path)
-                    || (WATER_API + "/ui/app/master").equals(path)
-                    || (WATER_API + "/bill/lst-owner").equals(path)
-                    || ((WATER_API + "/bill/view-full").equals(path)
-                        && uri.getQueryParameterNames().equals(Collections.singleton("id"))
-                        && uri.getQueryParameters("id").size() == 1
-                        && validWaterBillId(uri.getQueryParameter("id")));
-        }
-        return "POST".equals(method) && ((WATER_API + "/acc/login/code").equals(path)
-                || (WATER_API + "/acc/login").equals(path));
+        return isChaoxing(uri) && CxNet.isHost(uri.getHost()) && "GET".equals(method);
     }
 
-    private static boolean validWaterBillId(String id) {
-        return id != null && id.matches("[A-Za-z0-9_-]{1,128}");
-    }
-
-    private JSONObject request(String method, URL url, String body, String referer,
-                               String headers, java.net.CookieManager studyCookies,
-                               java.net.CookieManager waterCookies) throws Exception {
-        boolean study = studyCookies != null;
-        java.net.CookieManager cookies = study ? studyCookies : waterCookies;
+    private JSONObject request(String method, URL url, String referer, String headers,
+                               java.net.CookieManager studyCookies) throws Exception {
         String customHeaders = headers;
         for (int redirects = 0; redirects <= 5; redirects++) {
-            if (study && !CxNet.isCurrent(studyCookies)) return failure(401);
+            if (!CxNet.isCurrent(studyCookies)) return failure(401);
             if (!allowed(method, url)) throw new SecurityException("Unsupported request");
             HttpURLConnection connection = (HttpURLConnection) url.openConnection();
             try {
@@ -184,31 +129,19 @@ public final class NativeBridge {
                 connection.setInstanceFollowRedirects(false);
                 connection.setRequestProperty("User-Agent", UA);
                 connection.setRequestProperty("Accept-Language", "zh-CN,zh;q=0.9");
-                if (study && !referer.isEmpty() && isChaoxing(Uri.parse(referer))) {
+                if (!referer.isEmpty() && isChaoxing(Uri.parse(referer))) {
                     connection.setRequestProperty("Referer", referer);
                 }
-                applyHeaders(connection, customHeaders, study);
-                boolean sentCookie = false;
-                if (cookies != null) {
-                    for (Map.Entry<String, List<String>> header :
-                            cookies.get(url.toURI(), Collections.emptyMap()).entrySet()) {
-                        for (String value : header.getValue()) {
-                            connection.addRequestProperty(header.getKey(), value);
-                            if ("Cookie".equalsIgnoreCase(header.getKey()) && !value.isEmpty()) sentCookie = true;
-                        }
-                    }
-                }
-                if ("POST".equals(method)) {
-                    byte[] payload = body.getBytes(StandardCharsets.UTF_8);
-                    connection.setDoOutput(true);
-                    connection.setFixedLengthStreamingMode(payload.length);
-                    try (OutputStream out = connection.getOutputStream()) {
-                        out.write(payload);
+                applyHeaders(connection, customHeaders);
+                for (Map.Entry<String, List<String>> header :
+                        studyCookies.get(url.toURI(), Collections.emptyMap()).entrySet()) {
+                    for (String value : header.getValue()) {
+                        connection.addRequestProperty(header.getKey(), value);
                     }
                 }
                 int status = connection.getResponseCode();
-                if (cookies != null) cookies.put(url.toURI(), connection.getHeaderFields());
-                if (study && status >= 300 && status < 400) {
+                studyCookies.put(url.toURI(), connection.getHeaderFields());
+                if (status >= 300 && status < 400) {
                     String location = connection.getHeaderField("Location");
                     if (location != null && !location.isEmpty()) {
                         URL next = new URL(url, location);
@@ -220,15 +153,7 @@ public final class NativeBridge {
                 }
                 JSONObject result = new JSONObject();
                 result.put("status", status);
-                if (study) result.put("serverTime", connection.getDate());
-                if (waterCookies != null) {
-                    result.put("sessionSent", sentCookie);
-                    result.put("sessionPresent", !waterCookies.getCookieStore().getCookies().isEmpty());
-                    if (debugDiagnosticsEnabled()) {
-                        result.put("setCookiePresent", connection.getHeaderField("Set-Cookie") != null
-                                || connection.getHeaderField("Set-Cookie2") != null);
-                    }
-                }
+                result.put("serverTime", connection.getDate());
                 result.put("body", readAll(status >= 400 ? connection.getErrorStream()
                                                         : connection.getInputStream()));
                 result.put("url", url.toString());
@@ -240,16 +165,13 @@ public final class NativeBridge {
         throw new SecurityException("Unsupported redirect");
     }
 
-    private static void applyHeaders(HttpURLConnection connection, String headers, boolean study) throws Exception {
+    private static void applyHeaders(HttpURLConnection connection, String headers) throws Exception {
         if (headers.isEmpty()) return;
         JSONObject values = new JSONObject(headers);
         Iterator<String> keys = values.keys();
         while (keys.hasNext()) {
             String key = keys.next();
             switch (key) {
-                case "Authorization":
-                    if (!study) connection.setRequestProperty(key, values.getString(key));
-                    break;
                 case "User-Agent":
                 case "Accept":
                 case "Accept-Language":
@@ -285,28 +207,11 @@ public final class NativeBridge {
     @JavascriptInterface public void cxInvalidate(String expected) { CxNet.invalidate(expected); }
     @JavascriptInterface public String loadWater() { return CredStore.loadWater(); }
     @JavascriptInterface public String saveWater(String value) { return CredStore.saveWater(value); }
-    @JavascriptInterface public boolean waterLoginConfigured() { return !WaterLoginConfig.SALT_BASE64.isEmpty(); }
-
-    @JavascriptInterface
-    public String signWaterLogin(String phone, String code) {
-        if (!waterLoginConfigured() || phone == null || !phone.matches("1\\d{10}")
-                || code == null || !code.matches("\\d{4,10}")) return "";
-        try {
-            java.security.MessageDigest digest = java.security.MessageDigest.getInstance("MD5");
-            digest.update(("authCode=" + code + "&un=" + phone).getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            byte[] hash = digest.digest(android.util.Base64.decode(WaterLoginConfig.SALT_BASE64, android.util.Base64.NO_WRAP));
-            StringBuilder signature = new StringBuilder(hash.length * 2);
-            for (byte value : hash) {
-                signature.append(Character.forDigit((value & 0xff) >>> 4, 16));
-                signature.append(Character.forDigit(value & 0xf, 16));
-            }
-            return signature.toString();
-        } catch (java.security.NoSuchAlgorithmException error) {
-            return "";
-        }
-    }
     @JavascriptInterface public String waterState() { return CredStore.waterState(); }
-    @JavascriptInterface public void clearWater() { CredStore.clearWater(); }
+    @JavascriptInterface public void clearWater() {
+        CredStore.clearWater();
+        if (!closed) pool.execute(WaterHttp::clearCookies);
+    }
 
     @JavascriptInterface
     public void openOfficialWater() {

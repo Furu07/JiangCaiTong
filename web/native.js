@@ -15,13 +15,13 @@
     }
   };
 
-  window.nativeRequest = function (method, url, body, referer, headers, studyScope, waterAttempt) {
+  window.nativeRequest = function (method, url, body, referer, headers, studyScope) {
     return new Promise((resolve, reject) => {
       const id = ++sequence;
       pending.set(id, { resolve, reject });
       try {
         Android.req2(id, method, url, body || '', referer || '',
-                     headers ? JSON.stringify(headers) : '', studyScope || '', waterAttempt || '');
+                     headers ? JSON.stringify(headers) : '', studyScope || '');
       } catch (error) {
         pending.delete(id);
         reject(new Error('无法调用 Android 网络服务'));
