@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.8.2';
+const APP_VERSION = '0.8.4';
 const $ = id => document.getElementById(id);
 const tabs = Array.from(document.querySelectorAll('[data-tab]'));
 const native = window.Android;
@@ -667,7 +667,6 @@ let waterMessage = '';
 let waterVerifiedAt = 0;
 let waterDeviceId = '';
 let captcha = null;
-let captchaReady = false;
 let smsUntil = 0;
 let smsTimer;
 let billPage = -1;
@@ -685,16 +684,17 @@ function renderWater() {
       : '登录后查看余额和消费记录。');
   $('waterStatus').dataset.tone = /失败|错误|失效|不可用/.test($('waterStatus').textContent) ? 'warning'
     : connected && !waterBusy ? 'success' : '';
-  $('waterLoginOpen').hidden = !canStart;
-  $('waterLoginOpen').textContent = connected ? '切换用水账号' : '手机验证码登录';
+  $('waterLoginOpen').hidden = !native || (connected && !canStart);
+  $('waterLoginOpen').textContent = !canStart ? '查看图形验证码'
+    : connected ? '切换用水账号' : '手机验证码登录';
   $('waterOfficial').hidden = $('waterExternalHelp').hidden = !native || !native.openOfficialWater;
   $('waterVerify').hidden = $('waterRefresh').hidden = !connected;
   $('waterResults').hidden = !connected;
-  ['waterVerify', 'waterRefresh', 'waterLoginCancel', 'billRefresh', 'billMore', 'phone', 'graph', 'sms']
+  ['waterVerify', 'waterRefresh', 'waterLoginOpen', 'waterLoginCancel', 'loadCaptcha', 'billRefresh', 'billMore']
     .forEach(id => { $(id).disabled = !native || waterBusy; });
-  $('waterLoginOpen').disabled = $('loadCaptcha').disabled = !canStart || waterBusy;
+  ['phone', 'graph', 'sms'].forEach(id => { $(id).disabled = !canStart || waterBusy; });
   $('waterLogin').disabled = !canStart || waterBusy || !Water.canLogin($('phone').value.trim());
-  $('sendSms').disabled = !canStart || waterBusy || !captchaReady || Date.now() < smsUntil;
+  updateSmsButton(canStart);
   $('billMore').hidden = !moreBills;
   const trace = Water.diagnostics();
   $('waterDiagnostic').hidden = !trace.length;
@@ -729,15 +729,17 @@ function showDevices(devices) {
   showSelection();
 }
 
-function showCaptcha() {
-  if (!Water.loginConfigured() || waterBusy) return;
-  if (!/^1\d{10}$/.test($('phone').value.trim())) {
-    toast('请先输入 11 位手机号');
-    return;
-  }
-  captcha = Water.captcha();
-  captchaReady = false;
+function clearWaterCaptcha() {
+  captcha = null;
   $('graph').value = '';
+  $('captcha').hidden = true;
+  $('captcha').removeAttribute('src');
+}
+
+function showCaptcha() {
+  if (!native || waterBusy) return;
+  clearWaterCaptcha();
+  captcha = Water.captcha();
   $('sms').value = '';
   $('captcha').hidden = false;
   $('captcha').src = captcha.url;
@@ -762,18 +764,15 @@ function hideWaterForm() {
   Water.clearLoginAttempt();
   $('waterForm').reset();
   $('waterForm').hidden = true;
-  $('captcha').hidden = true;
-  $('captcha').removeAttribute('src');
-  captcha = null;
-  captchaReady = false;
+  clearWaterCaptcha();
 }
 
 function showWaterForm() {
-  if (!Water.loginConfigured()) return;
+  if (!native || waterBusy) return;
   selectLifeService('water');
   select('life');
   $('waterForm').hidden = false;
-  $('phone').focus();
+  $(Water.loginConfigured() ? 'phone' : 'loadCaptcha').focus();
 }
 
 async function runWater(action) {
@@ -792,27 +791,28 @@ async function runWater(action) {
   }
 }
 
-function updateSmsButton() {
+function updateSmsButton(canStart = Water.loginConfigured()) {
   clearTimeout(smsTimer);
   const remaining = Math.max(0, Math.ceil((smsUntil - Date.now()) / 1000));
   $('sendSms').textContent = remaining ? '重发 · ' + remaining + ' 秒' : '发送短信';
-  $('sendSms').disabled = !Water.loginConfigured() || waterBusy || !captchaReady || remaining > 0;
+  $('sendSms').disabled = !canStart || waterBusy || !captcha?.ready || remaining > 0;
   if (remaining) smsTimer = setTimeout(updateSmsButton, 1000);
 }
 
 function sendSms() {
+  if ($('sendSms').disabled || !captcha?.ready) return;
   const phone = $('phone').value.trim();
   const graph = $('graph').value.trim();
-  if (!Water.loginConfigured() || Date.now() < smsUntil || !captchaReady) return;
   if (!/^1\d{10}$/.test(phone) || !graph) {
     toast('请输入 11 位手机号和图形验证码');
     return;
   }
+  const key = captcha.key;
   runWater(async () => {
+    clearWaterCaptcha();
     $('sms').value = '';
-    await Water.sendSms(phone, captcha.key, graph);
+    await Water.sendSms(phone, key, graph);
     smsUntil = Date.now() + 60000;
-    updateSmsButton();
     waterMessage = '短信已发送，请输入收到的验证码。';
   });
 }
@@ -1024,24 +1024,20 @@ $('waterLoginCancel').addEventListener('click', hideWaterForm);
 $('phone').addEventListener('input', () => {
   Water.clearLoginAttempt();
   $('sms').value = '';
-  $('graph').value = '';
-  captcha = null;
-  captchaReady = false;
-  $('captcha').hidden = true;
-  $('captcha').removeAttribute('src');
   waterMessage = '';
   renderWater();
 });
 $('loadCaptcha').addEventListener('click', showCaptcha);
 $('captcha').addEventListener('load', () => {
   if (!captcha) return;
-  captchaReady = true;
-  waterMessage = '请输入图形验证码后发送短信。';
+  captcha.ready = true;
+  waterMessage = Water.loginConfigured() ? '请输入图形验证码后发送短信。'
+    : '图形验证码已加载。短信登录仍缺少授权配置。';
   renderWater();
 });
 $('captcha').addEventListener('error', () => {
   if (!captcha) return;
-  captchaReady = false;
+  clearWaterCaptcha();
   waterMessage = '验证码加载失败，请手动重试。';
   renderWater();
 });
