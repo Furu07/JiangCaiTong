@@ -35,6 +35,7 @@ public final class NativeBridge {
 
     private final WebView web;
     private final ExecutorService pool = Executors.newSingleThreadExecutor();
+    private final ExecutorService waterPool = Executors.newCachedThreadPool();
     private volatile boolean closed;
     private volatile boolean clearingWebCookies;
 
@@ -47,7 +48,7 @@ public final class NativeBridge {
         if (closed) return;
         boolean study = isChaoxing(Uri.parse(url));
         java.net.CookieManager studyCookies = study ? CxNet.cookieJar(studyScope) : null;
-        pool.execute(() -> {
+        (study ? pool : waterPool).execute(() -> {
             JSONObject result;
             try {
                 URL target = new URL(url);
@@ -210,7 +211,7 @@ public final class NativeBridge {
     @JavascriptInterface public String waterState() { return CredStore.waterState(); }
     @JavascriptInterface public void clearWater() {
         CredStore.clearWater();
-        if (!closed) pool.execute(WaterHttp::clearCookies);
+        if (!closed) WaterHttp.clearCookies();
     }
 
     @JavascriptInterface
@@ -400,5 +401,6 @@ public final class NativeBridge {
     void close() {
         closed = true;
         pool.shutdownNow();
+        waterPool.shutdownNow();
     }
 }

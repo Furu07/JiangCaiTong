@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.8.8';
+const APP_VERSION = '0.8.9';
 const $ = id => document.getElementById(id);
 const tabs = Array.from(document.querySelectorAll('[data-tab]'));
 const native = window.Android;
@@ -66,7 +66,7 @@ function closeCourseDetails() {
   if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
   return true;
 }
-window.closeDetails = () => window.closeTodoEditor?.() || closeCourseDetails();
+window.closeDetails = () => WaterPage.close() || window.closeTodoEditor?.() || closeCourseDetails();
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && window.closeDetails()) event.preventDefault();
 });
@@ -661,361 +661,17 @@ async function queryStudy(course, checkOnly = false) {
   }
 }
 
-let waterBusy = false;
-let waterExpired = false;
-let waterMessage = '';
-let waterVerifiedAt = 0;
-let waterDeviceId = '';
-let waterDevices = [];
-let smsPhone = '';
-let captcha = null;
-let smsUntil = 0;
-let smsTimer;
-let billPage = -1;
-let moreBills = false;
-
-function renderWater() {
-  const state = native ? Water.state() : { accounts: {} };
-  const connected = !!state.accounts.device && !waterExpired;
-  const canStart = Water.loginConfigured();
-  $('waterStatus').textContent = waterMessage || (connected
-    ? waterVerifiedAt ? '用水会话已核验 · ' + time(waterVerifiedAt) : '本机已保存用水会话。'
-    : !canStart && native
-      ? '应用内短信登录暂不可用，缺少授权配置。' : waterExpired || state.state === 'broken'
-      ? '登录已失效，请重新登录。'
-      : '登录后查看余额、收藏设备和消费记录。');
-  $('waterStatus').dataset.tone = /失败|错误|失效|不可用/.test($('waterStatus').textContent) ? 'warning'
-    : connected && !waterBusy ? 'success' : '';
-  const live = connected ? Water.live() : null;
-  $('waterLoginOpen').hidden = !native || !!live || (connected && !canStart);
-  $('waterLoginOpen').textContent = !canStart ? '查看图形验证码'
-    : connected ? '切换用水账号' : '手机验证码登录';
-  $('waterOfficial').hidden = $('waterExternalHelp').hidden = !native || !native.openOfficialWater;
-  $('waterVerify').hidden = $('waterRefresh').hidden = !connected;
-  $('waterResults').hidden = !connected;
-  ['waterVerify', 'waterRefresh', 'waterLoginOpen', 'waterLoginCancel', 'loadCaptcha', 'billRefresh', 'billMore']
-    .forEach(id => { $(id).disabled = !native || waterBusy; });
-  ['phone', 'graph', 'sms'].forEach(id => { $(id).disabled = !canStart || waterBusy; });
-  $('waterLogin').disabled = !canStart || waterBusy || smsPhone !== $('phone').value.trim() || !smsPhone;
-  updateSmsButton(canStart);
-  $('billMore').hidden = !moreBills;
-  if (connected && !$('devices').childElementCount && state.at) {
-    showDevices(state.devices);
-    $('deviceStatus').textContent = '本机缓存 · ' + time(state.at);
-  }
-  renderWaterControls(live);
-}
-
-function showDevices(devices) {
-  waterDevices = devices;
-  empty($('devices'));
-  if (!devices.some(device => device.id === waterDeviceId)) waterDeviceId = '';
-  devices.forEach(device => {
-    const button = node('button', null, 'course-list-item');
-    button.type = 'button';
-    button.append(node('span', device.name || '饮水机', 'course-name'),
-      node('span', '编号 · ' + device.id, 'course-meta'));
-    button.addEventListener('click', () => {
-      waterDeviceId = device.id;
-      renderWater();
-    });
-    $('devices').appendChild(button);
-  });
-}
-
-function renderWaterControls(live) {
-  const selected = waterDevices.find(device => device.id === waterDeviceId);
-  $('devices').querySelectorAll('button').forEach((button, index) => {
-    button.disabled = waterBusy || !!live;
-    button.setAttribute('aria-pressed', String(waterDevices[index].id === waterDeviceId));
-  });
-  const label = live ? live.name : selected && (selected.name || selected.id);
-  const status = live ? {
-    starting: '启动结果未确认，请在设备旁核实。',
-    started: '平台已确认启动请求，请在设备旁查看出水状态。',
-    stopping: '结束结果未确认，请查看设备或账单。',
-    settling: '平台已接收结束请求，等待账单结算。'
-  }[live.phase] : '请在设备旁核实实时状态。';
-  $('waterSelected').textContent = label ? label + ' · ' + status : '';
-  $('waterStart').hidden = !selected || !!live;
-  $('waterStop').hidden = !live || !['starting', 'started'].includes(live.phase);
-  $('waterDismissUse').hidden = !live;
-  ['waterStart', 'waterStop', 'waterDismissUse'].forEach(id => { $(id).disabled = waterBusy; });
-}
-
-function controlWater(start) {
-  if (waterBusy || waterExpired) return;
-  const live = Water.live();
-  const selected = waterDevices.find(device => device.id === waterDeviceId);
-  if (start ? live || !selected : !live || !['starting', 'started'].includes(live.phase)) return;
-  const record = start
-    ? { did: selected.id, name: selected.name || selected.id, at: Date.now(), phase: 'starting' }
-    : { ...live, phase: 'stopping' };
-  const prompt = start ? '确认你在「' + record.name + '」旁，启动后将按平台规则计费。'
-    : '确认你在「' + record.name + '」旁，并要结束本次用水。';
-  if (!window.confirm(prompt)) return;
-  runWater(async () => {
-    Water.rememberUse(record);
-    try {
-      const message = await (start ? Water.start(record.did) : Water.end(record.did));
-      Water.rememberUse({ ...record, phase: start ? 'started' : 'settling' });
-      waterMessage = message;
-    } catch (error) {
-      if (error.code != null) Water.rememberUse(start ? null : live);
-      else toast('操作结果待核实，请先查看设备状态。');
-      throw error;
-    }
-    if (!start) {
-      try {
-        await loadWaterBills(false);
-        if (Water.live()) waterMessage = '平台已接收结束请求，账单结算中。';
-      } catch (error) {
-        if (error.kind === 'auth') throw error;
-        waterMessage = '平台已接收结束请求，暂未读到账单。';
-      }
-    }
-  });
-}
-
-function dismissWaterUse() {
-  if (waterBusy || !Water.live() || !window.confirm('请在设备旁确认已停止出水。关闭提示不会向设备发送指令。')) return;
-  runWater(() => {
-    Water.rememberUse(null);
-    waterMessage = '已关闭本次操作提示，可在消费记录中核对账单。';
-  });
-}
-
-function clearWaterCaptcha() {
-  captcha = null;
-  $('graph').value = '';
-  $('captcha').hidden = true;
-  $('captcha').removeAttribute('src');
-}
-
-function showCaptcha(keepMessage = false) {
-  if (!native) return;
-  clearWaterCaptcha();
-  const key = Water.captchaKey();
-  captcha = { key };
-  $('sms').value = '';
-  $('captcha').hidden = false;
-  $('captcha').src = Water.captchaUrl(key);
-  if (keepMessage !== true) waterMessage = '正在加载图形验证码…';
-  captcha.keepMessage = keepMessage === true;
-  renderWater();
-}
-
-function resetWaterView() {
-  waterVerifiedAt = 0;
-  waterDeviceId = '';
-  waterDevices = [];
-  $('balance').textContent = '—';
-  $('deviceStatus').textContent = '';
-  $('waterSelected').textContent = '';
-  $('billStatus').textContent = '';
-  empty($('devices'));
-  empty($('bills'));
-  billPage = -1;
-  moreBills = false;
-}
-
-function hideWaterForm() {
-  smsPhone = '';
-  smsUntil = 0;
-  $('waterForm').reset();
-  $('waterForm').hidden = true;
-  clearWaterCaptcha();
-}
-
-function showWaterForm() {
-  if (!native || waterBusy) return;
-  selectLifeService('water');
-  select('life');
-  $('waterForm').hidden = false;
-  if (!captcha) showCaptcha();
-  if (Water.loginConfigured()) $('phone').focus();
-}
-
-async function runWater(action) {
-  if (!native || waterBusy) return;
-  waterBusy = true;
-  waterMessage = '正在请求慧生活798…';
-  refreshSession();
-  try {
-    await action();
-  } catch (error) {
-    if (error.kind === 'auth') waterExpired = true;
-    waterMessage = error.message;
-  } finally {
-    waterBusy = false;
-    refreshSession();
-  }
-}
-
-function updateSmsButton(canStart = Water.loginConfigured()) {
-  clearTimeout(smsTimer);
-  const remaining = Math.max(0, Math.ceil((smsUntil - Date.now()) / 1000));
-  $('sendSms').textContent = remaining ? '重发 · ' + remaining + ' 秒' : '发送短信';
-  $('sendSms').disabled = !canStart || waterBusy || !captcha?.ready || remaining > 0;
-  if (remaining) smsTimer = setTimeout(updateSmsButton, 1000);
-}
-
-function sendSms() {
-  if ($('sendSms').disabled || !captcha?.ready) return;
-  const phone = $('phone').value.trim();
-  const graph = $('graph').value.trim();
-  if (!/^1\d{10}$/.test(phone) || !graph) {
-    toast('请输入 11 位手机号和图形验证码');
-    return;
-  }
-  const key = captcha.key;
-  runWater(async () => {
-    smsPhone = '';
-    $('sms').value = '';
-    try {
-      await Water.sendSms(phone, key, graph);
-    } catch (error) {
-      showCaptcha(true);
-      throw error;
-    }
-    smsPhone = phone;
-    smsUntil = Date.now() + 60000;
-    waterMessage = '短信已发送，请输入收到的验证码。';
-    requestAnimationFrame(() => { if (!$('waterForm').hidden) $('sms').focus(); });
-  });
-}
-
-function loginWater(event) {
-  event.preventDefault();
-  const phone = $('phone').value.trim();
-  const sms = $('sms').value.trim();
-  if ($('waterLogin').disabled) return;
-  if (!/^1\d{10}$/.test(phone) || !/^\d{4,8}$/.test(sms)) {
-    toast('请输入有效的手机号和短信验证码');
-    return;
-  }
-  runWater(async () => {
-    try {
-      await Water.login(phone, sms);
-    } catch (error) {
-      smsPhone = '';
-      showCaptcha(true);
-      toast(error.message);
-      throw error;
-    }
-    waterExpired = false;
-    waterMessage = '登录状态已保存，正在读取账户…';
-    resetWaterView();
-    hideWaterForm();
-    await Water.account();
-    waterVerifiedAt = Date.now();
-    const loaded = await loadWaterSummary();
-    const summaryMessage = waterMessage;
-    await loadWaterBills(false);
-    if (loaded) waterMessage = '已登录，余额、收藏设备和消费记录已查询。';
-    else waterMessage = summaryMessage;
-  });
-}
-
-function currency(amount) {
-  return typeof amount === 'number' ? '¥' + amount.toFixed(2) : '金额未读到';
-}
-
-function verifyWater() {
-  runWater(async () => {
-    await Water.account();
-    waterVerifiedAt = Date.now();
-    waterMessage = '';
-  });
-}
-
-function refreshWater() {
-  runWater(loadWaterSummary);
-}
-
-async function loadWaterSummary() {
-  const errors = [];
-  try {
-    $('balance').textContent = currency(await Water.balance());
-  } catch (error) {
-    if (error.kind === 'auth') throw error;
-    errors.push('余额 · ' + error.message);
-    $('balance').textContent = '未读到';
-  }
-  try {
-    const devices = await Water.devices();
-    showDevices(devices);
-    $('deviceStatus').textContent = devices.length ? '刚刚更新' : '没有设备记录';
-  } catch (error) {
-    if (error.kind === 'auth') throw error;
-    errors.push('设备 · ' + error.message);
-    $('deviceStatus').textContent = '更新失败，保留已有设备记录';
-  }
-  waterMessage = errors.join('；') || '余额和设备已更新。';
-  return errors.length === 0;
-}
-
-function queryBills(more) {
-  if (more && !moreBills) return;
-  runWater(() => loadWaterBills(more));
-}
-
-async function loadWaterBills(more) {
-  const page = more ? billPage + 1 : 0;
-  const result = await Water.bills(page, 20);
-  if (!more) empty($('bills'));
-  result.items.forEach(item => {
-    const date = item.at ? time(item.at) : '时间未读到';
-    const caption = [currency(item.money), date, item.did ? '设备 ' + item.did : ''].filter(Boolean).join(' · ');
-    const title = item.msg || '消费记录';
-    if (!/^[A-Za-z0-9_-]{1,128}$/.test(item.id)) {
-      $('bills').appendChild(resultRow(title, caption));
-      return;
-    }
-    const button = node('button', null, 'course-list-item');
-    button.type = 'button';
-    button.append(node('span', title, 'course-name'), node('span', caption, 'course-meta'));
-    button.addEventListener('click', () => runWater(async () => {
-      const detail = await Water.billDetail(item.id);
-      if (!$('page-life').hidden && !$('life-water').hidden) {
-        showDetails('798 账单详情', [
-          '账单金额 · ' + currency(detail.money),
-          detail.settled ? '账单已结算' : detail.status != null ? '状态码 · ' + detail.status : '',
-          detail.at ? '账单时间 · ' + time(detail.at) : '',
-          detail.did ? '设备 · ' + detail.did : ''
-        ].filter(Boolean));
-      }
-      waterMessage = '账单详情已读取。';
-    }));
-    $('bills').appendChild(button);
-  });
-  billPage = page;
-  moreBills = result.more;
-  $('billStatus').textContent = $('bills').childElementCount
-    ? '已显示 ' + $('bills').childElementCount + ' 条记录' : '没有消费记录';
-  waterMessage = '消费记录已更新。';
-  const live = Water.live();
-  const item = live && result.items.find(bill => bill.did === live.did && bill.at >= live.at
-    && /^[A-Za-z0-9_-]{1,128}$/.test(bill.id));
-  if (item) {
-    const detail = await Water.billDetail(item.id);
-    if (detail.settled) {
-      Water.rememberUse(null);
-      waterMessage = '已读到本次用水的结算账单 · ' + currency(detail.money ?? item.money);
-    }
-  }
-}
-
 function renderAccounts() {
   const cx = native && native.cxHasLogin();
   const water = native ? Water.state() : { accounts: {} };
   $('studyAccount').textContent = cx ? '已登录' : '未连接';
   $('studyAccountAction').textContent = cx ? '退出' : '前往登录';
   $('studyAccountAction').disabled = studyBusy;
-  $('waterAccount').textContent = waterExpired || water.state === 'broken' ? '会话已失效'
-    : water.accounts.device ? '已登录' : '未连接';
-  $('waterAccountAction').textContent = water.accounts.device || water.state === 'broken' ? '退出' : '前往服务';
-  $('waterAccountAction').disabled = waterBusy;
+  const accounts = water.accounts;
+  $('waterAccount').textContent = accounts.device && accounts.score ? '设备、积分均已登录'
+    : accounts.device ? '设备账号已登录' : accounts.score ? '积分账号已登录'
+      : water.state === 'broken' ? '会话已失效' : '未连接';
+  $('waterAccountAction').textContent = '管理';
   $('clearWebCache').disabled = !native;
 }
 
@@ -1037,11 +693,12 @@ function selectLifeService(service) {
     $(button.getAttribute('aria-controls')).hidden = !active;
   });
   if (service === 'zhuli') renderZhuli();
+  WaterPage.update();
 }
 
 function refreshSession() {
   renderStudy();
-  renderWater();
+  WaterPage.update();
   renderAccounts();
   if (!$('page-life').hidden && !$('life-zhuli').hidden) renderZhuli();
 }
@@ -1086,24 +743,8 @@ $('studyAccountAction').addEventListener('click', () => {
 });
 
 $('waterAccountAction').addEventListener('click', () => {
-  const state = native && Water.state();
-  if (!state || (!state.accounts.device && state.state !== 'broken')) {
-    selectLifeService('water');
-    select('life');
-    return;
-  }
-  if (!window.confirm(Water.live() ? '还有用水操作待核实。确认设备已停止后退出慧生活798？'
-    : '退出慧生活798并清除本机会话？')) return;
-  try {
-    Water.logout();
-    waterExpired = false;
-    waterMessage = '已退出慧生活798。';
-    resetWaterView();
-    hideWaterForm();
-  } catch (error) {
-    toast('无法清除慧生活798登录状态');
-  }
-  refreshSession();
+  selectLifeService('water');
+  select('life');
 });
 
 tabs.forEach(button => button.addEventListener('click', () => select(button.dataset.tab)));
@@ -1115,39 +756,6 @@ $('zhuliOpen').addEventListener('click', () => {
 });
 $('studyLogin').addEventListener('click', openStudyLogin);
 $('studyRefresh').addEventListener('click', () => queryStudy(null));
-$('waterLoginOpen').addEventListener('click', showWaterForm);
-$('waterVerify').addEventListener('click', verifyWater);
-$('waterOfficial').addEventListener('click', () => native.openOfficialWater());
-$('waterLoginCancel').addEventListener('click', hideWaterForm);
-$('phone').addEventListener('input', () => {
-  smsPhone = '';
-  $('sms').value = '';
-  waterMessage = '';
-  renderWater();
-});
-$('loadCaptcha').addEventListener('click', showCaptcha);
-$('captcha').addEventListener('load', () => {
-  if (!captcha) return;
-  captcha.ready = true;
-  if (!captcha.keepMessage) waterMessage = Water.loginConfigured() ? '请输入图形验证码后发送短信。'
-    : '图形验证码已加载。短信登录仍缺少授权配置。';
-  renderWater();
-});
-$('captcha').addEventListener('error', () => {
-  if (!captcha) return;
-  const keepMessage = captcha.keepMessage;
-  clearWaterCaptcha();
-  if (!keepMessage) waterMessage = '验证码加载失败，请手动重试。';
-  renderWater();
-});
-$('sendSms').addEventListener('click', sendSms);
-$('waterForm').addEventListener('submit', loginWater);
-$('waterRefresh').addEventListener('click', refreshWater);
-$('waterStart').addEventListener('click', () => controlWater(true));
-$('waterStop').addEventListener('click', () => controlWater(false));
-$('waterDismissUse').addEventListener('click', dismissWaterUse);
-$('billRefresh').addEventListener('click', () => queryBills(false));
-$('billMore').addEventListener('click', () => queryBills(true));
 $('sheetClose').addEventListener('click', closeCourseDetails);
 $('sheetMask').addEventListener('click', event => {
   if (event.target === $('sheetMask')) closeCourseDetails();

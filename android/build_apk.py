@@ -1,5 +1,6 @@
 """Build a locally signed Debug APK with Android SDK command-line tools."""
 from pathlib import Path
+import hashlib
 import json
 import os
 import re
@@ -10,8 +11,8 @@ import zipfile
 
 ANDROID = Path(__file__).resolve().parent
 ROOT = ANDROID.parent
-VERSION = "0.8.8"
-VERSION_CODE = 33
+VERSION = "0.8.9"
+VERSION_CODE = 34
 MIN_SDK = 26
 TARGET_SDK = 33
 BUILD_TOOLS = "35.0.0"
@@ -70,15 +71,23 @@ def main():
     app = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
     if not re.search(r"^const APP_VERSION = '" + re.escape(VERSION) + r"';$", app, re.M):
         raise SystemExit("web/app.js 的版本与 Android 构建配置不一致。")
-    # Use the authorized local reference. Only the bundled asset gets the value.
-    water_source = ROOT / "hangyuantong-main" / "web" / "native.js"
-    salt = ""
-    if water_source.is_file():
-        match = re.search(r"""^\s*SALT_APP:\s*(['"])([^'"\r\n]+)\1\s*,""",
-                          water_source.read_text(encoding="utf-8"), re.M)
-        if not match:
-            raise SystemExit("航院通本地参考源码缺少 WATER.SALT_APP 定义。")
-        salt = match.group(2)
+    # Use the supplied, authorized APK. Keep its client configuration out of Git.
+    reference = ROOT / "base.apk"
+    if not reference.is_file():
+        reference = Path.home() / "Downloads" / "base.apk"
+    water_values = {}
+    if reference.is_file():
+        expected = "e852a97f9eda9e3600626ec984b9633c5cdd97a8ad9341c372e589b69f50fa32"
+        if hashlib.sha256(reference.read_bytes()).hexdigest() != expected:
+            raise SystemExit("base.apk 与已核实的航院通 0.52.0 参考包哈希不一致。")
+        with zipfile.ZipFile(reference) as archive:
+            water_source = archive.read("assets/web/native.js").decode("utf-8")
+        for field in ("SALT_APP", "SALT_MINI", "CID"):
+            match = re.search(r"""^\s*""" + field + r""":\s*(['"])([^'"\r\n]+)\1\s*,""",
+                              water_source, re.M)
+            if not match:
+                raise SystemExit("航院通 0.52.0 参考包缺少 798 配置字段。")
+            water_values[field] = match.group(2)
 
     # Keep SDK/JDK temporary paths ASCII on Windows where aapt2 may reject Unicode paths.
     with tempfile.TemporaryDirectory(prefix="jct-apk-") as temp:
@@ -94,10 +103,12 @@ def main():
         classes.mkdir()
         water_asset = assets / "web" / "water.js"
         source = water_asset.read_text(encoding="utf-8")
-        marker = '/* local authorized build */ ""'
-        if source.count(marker) != 1:
-            raise SystemExit("798 本地构建标记缺失或重复。")
-        water_asset.write_text(source.replace(marker, json.dumps(salt)), encoding="utf-8")
+        for field in ("SALT_APP", "SALT_MINI", "CID"):
+            marker = f'/* P7F:{field} */ ""'
+            if source.count(marker) != 1:
+                raise SystemExit("798 本地构建标记缺失或重复。")
+            source = source.replace(marker, json.dumps(water_values.get(field, "")))
+        water_asset.write_text(source, encoding="utf-8")
 
         compiled = build / "resources.zip"
         raw = build / "resources.apk"

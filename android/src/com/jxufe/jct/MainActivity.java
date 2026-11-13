@@ -4,12 +4,14 @@ import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
 import android.view.View;
 import android.webkit.ValueCallback;
+import android.webkit.PermissionRequest;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
@@ -23,6 +25,7 @@ import java.io.IOException;
 public class MainActivity extends Activity {
     private static final int CHOOSE_TIMETABLE = 31;
     private static final int ACADEMIC_VISIT = 32;
+    private static final int WATER_CAMERA = 33;
     private boolean academicVisitActive;
     private boolean academicReturning;
 
@@ -57,6 +60,7 @@ public class MainActivity extends Activity {
     private WebView web;
     private NativeBridge bridge;
     private ValueCallback<Uri[]> fileSelection;
+    private PermissionRequest cameraRequest;
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -74,7 +78,7 @@ public class MainActivity extends Activity {
         settings.setAllowContentAccess(false);
         settings.setSaveFormData(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-        settings.setUserAgentString(settings.getUserAgentString() + " JiangCaiTong/0.8.8");
+        settings.setUserAgentString(settings.getUserAgentString() + " JiangCaiTong/0.8.9");
         if (android.os.Build.VERSION.SDK_INT >= 33) settings.setAlgorithmicDarkeningAllowed(false);
         bridge = new NativeBridge(web);
         web.addJavascriptInterface(bridge, "Android");
@@ -86,6 +90,26 @@ public class MainActivity extends Activity {
     }
 
     private final class LocalFileChooser extends WebChromeClient {
+        @Override
+        public void onPermissionRequest(PermissionRequest request) {
+            String[] resources = request.getResources();
+            if (!isLocal(request.getOrigin()) || resources.length != 1
+                    || !PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(resources[0])
+                    || cameraRequest != null) {
+                request.deny();
+            } else if (checkSelfPermission(android.Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                request.grant(resources);
+            } else {
+                cameraRequest = request;
+                requestPermissions(new String[]{android.Manifest.permission.CAMERA}, WATER_CAMERA);
+            }
+        }
+
+        @Override
+        public void onPermissionRequestCanceled(PermissionRequest request) {
+            if (cameraRequest == request) cameraRequest = null;
+        }
+
         @Override
         public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
             if (!isLocal(Uri.parse(view.getUrl() == null ? "" : view.getUrl()))
@@ -100,6 +124,19 @@ public class MainActivity extends Activity {
                 callback.onReceiveValue(null);
             }
             return true;
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int request, String[] permissions, int[] result) {
+        super.onRequestPermissionsResult(request, permissions, result);
+        if (request != WATER_CAMERA || cameraRequest == null) return;
+        PermissionRequest pending = cameraRequest;
+        cameraRequest = null;
+        if (result.length == 1 && result[0] == PackageManager.PERMISSION_GRANTED) {
+            pending.grant(new String[]{PermissionRequest.RESOURCE_VIDEO_CAPTURE});
+        } else {
+            pending.deny();
         }
     }
 

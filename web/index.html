@@ -6,6 +6,7 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' https://i.ilife798.com/api/v1/captcha/; base-uri 'none'; form-action 'none'">
   <title>酱菜通 · JiangCaiTong</title>
   <link rel="stylesheet" href="app.css">
+  <link rel="stylesheet" href="water-page.css">
   <script defer src="native.js"></script>
   <script defer src="academic.js"></script>
   <script defer src="jufe-academic.js"></script>
@@ -14,6 +15,7 @@
   <script defer src="learning.js"></script>
   <script defer src="study-activity.js"></script>
   <script defer src="water.js"></script>
+  <script defer src="water-page.js"></script>
   <script defer src="zhuli.js"></script>
   <script defer src="zhuli-devices.js"></script>
   <script defer src="zhuli-device-page.js"></script>
@@ -135,55 +137,270 @@
         <button class="btn" type="button" data-life="water" aria-controls="life-water" aria-pressed="true">校园饮水</button>
         <button class="btn" type="button" data-life="zhuli" aria-controls="life-zhuli" aria-pressed="false">校园洗浴</button>
       </nav>
-      <div class="scroll" id="life-water">
-        <div class="card pad">
-          <h2>慧生活798</h2>
-          <p class="sub status-note" id="waterStatus" role="status"></p>
-          <div class="controls">
-            <button class="btn primary" id="waterLoginOpen" hidden>手机验证码登录</button>
-            <button class="btn" id="waterOfficial" hidden>打开官方 App</button>
-            <button class="btn" id="waterVerify" type="button" hidden>核验用水会话</button>
-            <button class="btn" id="waterRefresh" hidden>刷新余额与设备</button>
-          </div>
-          <p class="sub" id="waterExternalHelp" hidden>可在官方 App 查看余额、设备和消费记录。</p>
-          <form id="waterForm" autocomplete="off" hidden>
-            <label>手机号<input id="phone" inputmode="numeric" type="tel" maxlength="11" required></label>
-            <label>图形验证码<input id="graph" maxlength="12"></label>
-            <div class="controls">
-              <img id="captcha" width="100" height="38" alt="慧生活图形验证码" hidden>
-              <button class="btn" type="button" id="loadCaptcha">加载验证码</button>
-              <button class="btn" type="button" id="sendSms">发送短信</button>
-            </div>
-            <label>短信验证码<input id="sms" inputmode="numeric" maxlength="10" required></label>
-            <div class="controls">
-              <button class="btn primary" type="submit" id="waterLogin">登录</button>
-              <button class="btn" type="button" id="waterLoginCancel">收起</button>
-            </div>
-          </form>
-        </div>
-        <div id="waterResults" hidden>
-          <section class="card pad"><h2>余额</h2><p id="balance" class="value">—</p></section>
-          <section class="card pad">
-            <h2>收藏设备</h2>
-            <p class="sub" id="deviceStatus"></p>
-            <div id="devices"></div>
-            <p class="sub status-note" id="waterSelected" role="status"></p>
-            <div class="controls">
-              <button class="btn primary" type="button" id="waterStart" hidden>开始用水</button>
-              <button class="btn primary" type="button" id="waterStop" hidden>结束用水</button>
-              <button class="btn" type="button" id="waterDismissUse" hidden>关闭操作提示</button>
-            </div>
-          </section>
-          <section class="card pad">
-            <h2>消费记录</h2>
-            <p class="sub" id="billStatus" role="status"></p>
-            <div id="bills"></div>
-            <div class="controls">
-              <button class="btn" id="billRefresh">查询记录</button>
-              <button class="btn" id="billMore" hidden>加载更多</button>
-            </div>
-          </section>
-        </div>
+      <div class="scroll jct-water" id="life-water">
+        <div class="controls"><button type="button" class="btn" id="jctWaterRefresh" hidden>刷新饮水与积分</button></div>
+<div class="card wtpad" id="wtAccounts">
+<div class="todohd">
+<span class="todotitle">账号</span>
+<span class="v muted">两个账号各管一半</span>
+</div>
+<div class="wtacc" id="wtAccDevice">
+<div class="wtacc-main">
+<b>设备登录</b>
+<span class="wtacc-sub" id="wtAccDeviceSub">接水 · 余额 · 设备列表</span>
+</div>
+<button class="btn" id="wtAccDeviceBtn" type="button">登录</button>
+</div>
+<div class="wtacc" id="wtAccScore">
+<div class="wtacc-main">
+<b>积分登录</b>
+<span class="wtacc-sub" id="wtAccScoreSub">积分 · 积分任务 · 签到</span>
+</div>
+<button class="btn" id="wtAccScoreBtn" type="button">登录</button>
+</div>
+<p class="tip note" hidden="" id="wtAccTip"></p>
+</div>
+<div hidden="" id="waterOff">
+<div class="card wtpad">
+<h2 id="wtLoginTitle">登录慧生活798</h2>
+<p class="sub">饮水机用它，和学校账号不通用。教学楼也一样，只登一次。</p>
+<p class="sub small" id="wtLoginWhy">短信验证码登录，不用密码。</p>
+</div>
+<div class="card wtpad">
+<label class="field">
+<span>手机号</span>
+<input autocomplete="tel" id="wtPhone" inputmode="numeric" maxlength="11" placeholder="慧生活798 注册的手机号" type="tel"/>
+</label>
+<label class="field">
+<span>图形验证码</span>
+<span class="wtcap">
+<input autocomplete="off" id="wtGraph" inputmode="latin" maxlength="8" placeholder="看图输入" type="text"/>
+
+<img alt="图形验证码，点一下换一张" class="wtcap-img" id="wtCapImg"/>
+</span>
+</label>
+<button class="pwdlost" id="wtCapNew" type="button">看不清？换一张</button>
+<label class="field">
+<span>短信验证码</span>
+<span class="wtcap">
+<input autocomplete="one-time-code" id="wtSms" inputmode="numeric" maxlength="8" placeholder="手机收到的数字" type="text"/>
+<button class="wtcap-send" id="wtSend" type="button">发送</button>
+</span>
+</label>
+<button class="btn primary block" id="wtLogin">登录</button>
+<button class="pwdlost" id="wtLoginCancel" type="button">取消</button>
+
+<p class="tip note" hidden="" id="wtTip"></p>
+</div>
+</div>
+<div class="card wtpad" hidden="" id="wtNeedLogin">
+
+<h2 id="wtNeedTitle">还没登录慧生活</h2>
+<p class="sub" id="wtNeedSub">接水、余额、积分任务都要先登录。</p>
+<button class="btn primary block" id="wtGoLogin">去登录</button>
+</div>
+<div hidden="" id="waterOn">
+
+<p class="tip note wtoff" hidden="" id="wtOffNote"></p>
+
+<div class="card warncard" hidden="" id="wtExpired">
+
+<h2 id="wtExpiredTitle">登录过期了</h2>
+<p class="sub" id="wtExpiredSub">隔一段时间会失效，重登一次就行。</p>
+<button class="btn primary block" id="wtRelogin">重新登录</button>
+</div>
+
+<div class="card">
+
+<div class="wtbal">
+<div class="wtbal-hd">
+
+<span class="wtbal-k">饮水余额</span>
+<span class="v muted" id="wtBalWhen"></span>
+</div>
+<div class="wtbal-top">
+
+<div class="wtbal-v" id="wtBalV">—</div>
+</div>
+
+<p class="tip note" hidden="" id="wtBalTip"></p>
+</div>
+
+
+
+<div class="wtstrip" hidden="" id="wtLast">
+<span class="wtstrip-t">
+<b>刚才那次</b>
+<span id="wtLastWhen"></span>
+</span>
+<span class="wtlast-v" id="wtLastV">—</span>
+<p class="tip note" hidden="" id="wtLastTip"></p>
+</div>
+
+<button aria-expanded="false" class="row tap" id="wtBillOpen">
+<span class="k">消费记录</span>
+<span class="rowend">
+<span class="v muted" id="wtBillBrief">—</span>
+<svg class="rowico cpchev" viewbox="0 0 24 24"><path d="M9 6l6 6-6 6"></path></svg>
+</span>
+</button>
+<div hidden="" id="wtBillBox">
+<div class="wtboxin">
+<div id="wtBills"></div>
+<p class="tip note" hidden="" id="wtBillTip"></p>
+<button class="btn block" hidden="" id="wtBillMore">加载更多</button>
+</div>
+</div>
+</div>
+
+<div class="card wtpad">
+<div class="todohd">
+<span class="todotitle">我的饮水机</span>
+<span class="v muted" id="wtDevN"></span>
+
+<span class="wtadd-hd">
+<span class="wtadd-lb">添加</span>
+<button aria-label="手动输入编号添加" class="wt-ico" id="wtDevType">
+
+<svg aria-hidden="true" viewbox="0 0 24 24">
+<rect height="13.2" rx="3.2" width="18.8" x="2.6" y="5.4"></rect>
+<g fill="currentColor" stroke="none">
+<circle cx="7.4" cy="9.5" r="1"></circle>
+<circle cx="12" cy="9.5" r="1"></circle>
+<circle cx="16.6" cy="9.5" r="1"></circle>
+<circle cx="7.4" cy="12.7" r="1"></circle>
+<circle cx="12" cy="12.7" r="1"></circle>
+<circle cx="16.6" cy="12.7" r="1"></circle>
+</g>
+<path d="M8.6 15.8h6.8"></path>
+</svg>
+</button>
+<button aria-label="扫码添加饮水机" class="wt-ico" id="wtDevAdd">
+<svg aria-hidden="true" viewbox="0 0 24 24">
+<path d="M4 8.6V6.4A2.4 2.4 0 0 1 6.4 4h2.2"></path>
+<path d="M15.4 4h2.2A2.4 2.4 0 0 1 20 6.4v2.2"></path>
+<path d="M20 15.4v2.2a2.4 2.4 0 0 1-2.4 2.4h-2.2"></path>
+<path d="M8.6 20H6.4A2.4 2.4 0 0 1 4 17.6v-2.2"></path>
+<path d="M4.2 12h15.6"></path>
+</svg>
+</button>
+
+
+</span>
+</div>
+<div id="wtDevs"></div>
+<p class="tip note" hidden="" id="wtDevTip"></p>
+
+<p class="tip note" id="wtRisk">接水会真的出水扣钱；充值、绑一卡通去慧生活798 里做。</p>
+
+<button class="row tap" hidden="" id="wtDevShow">
+<span class="k">已隐藏的饮水机</span>
+<span class="rowend">
+<span class="v muted" id="wtDevHideN">—</span>
+<svg class="rowico" viewbox="0 0 24 24"><path d="M9 6l6 6-6 6"></path></svg>
+</span>
+</button>
+</div>
+
+<div class="card wtpad" id="wtScoreCard">
+<div class="todohd">
+<span class="todotitle">积分</span>
+</div>
+<div class="wtpair">
+<div class="wtpair-i">
+<span class="wtpair-k">可用</span>
+
+<span class="wtpair-v" id="wtScoreValid">—</span>
+</div>
+<div class="wtpair-i">
+<span class="wtpair-k">累计</span>
+<span class="wtpair-v" id="wtScoreTotal">—</span>
+</div>
+</div>
+<p class="tip note" hidden="" id="wtScoreTip"></p>
+
+<button class="row tap" hidden="" id="wtExOpen">
+<span class="k">兑换成余额</span>
+<span class="rowend">
+<span class="v muted">1000 分 = ¥1</span>
+<svg class="rowico" viewbox="0 0 24 24"><path d="M9 6l6 6-6 6"></path></svg>
+</span>
+</button>
+<div hidden="" id="wtExBox">
+
+<button class="row tap" disabled="" id="wtExTo">
+<span class="k">兑换到</span>
+<span class="rowend">
+<span class="v muted" id="wtExWallet">—</span>
+<svg class="rowico" hidden="" id="wtExChev" viewbox="0 0 24 24">
+<path d="M9 6l6 6-6 6"></path>
+</svg>
+</span>
+</button>
+<div class="wtchips" id="wtExUnits">
+<button class="wtchip" data-unit="100" type="button">100 分</button>
+<button class="wtchip" data-unit="1000" type="button">1000 分</button>
+</div>
+<div class="wtqty">
+<button class="wtqty-btn" id="wtExMinus" type="button">−</button>
+<span class="wtqty-v" id="wtExQty">1</span>
+<button class="wtqty-btn" id="wtExPlus" type="button">+</button>
+</div>
+<p class="tip note" id="wtExSum"></p>
+
+<div class="wtExBtns">
+<button class="btn" id="wtExMax">全部兑换</button>
+<button class="btn primary" id="wtExGo">兑换</button>
+</div>
+<p class="tip note" hidden="" id="wtExMsg"></p>
+<button class="btn" id="wtExchangeHistory" type="button">兑换记录</button>
+</div>
+
+<div class="wtsec" id="wtTaskCard">
+
+
+<div class="todohd">
+<button aria-expanded="false" class="taskopen" id="wtTaskOpen">
+<span class="todotitle">积分任务</span>
+<span class="v muted" id="wtTaskCount"></span>
+<svg class="rowico cpchev" viewbox="0 0 24 24"><path d="M9 6l6 6-6 6"></path></svg>
+</button>
+<button class="todobtn solid" hidden="" id="wtRunAll">一键完成</button>
+</div>
+
+<p class="tip note" hidden="" id="wtMissionTip"></p>
+
+
+<div hidden="" id="wtTaskBox">
+
+<div class="wtrun" hidden="" id="wtRunNow">
+<div class="wtrun-hd">
+<span class="wtrun-name" id="wtRunNowName">正在进行</span>
+<span class="wtrun-cnt" id="wtRunNowCnt">0/0</span>
+</div>
+<div class="wtrun-bar"><i class="wtrun-fill" id="wtRunNowFill"></i></div>
+<p class="wtrun-sub" id="wtRunNowSub"></p>
+</div>
+<div id="wtMissions"></div>
+
+
+<button class="btn block" hidden="" id="wtRunStop">停下</button>
+<p class="tip note" hidden="" id="wtRunPace"></p>
+</div>
+</div>
+</div>
+<div class="card">
+
+<button class="row tap" id="wtOpenApp">
+<span class="k">打开慧生活798</span>
+<span class="rowend">
+<span class="v muted" id="wtPhoneShown">—</span>
+<svg class="rowico" viewbox="0 0 24 24"><path d="M9 6l6 6-6 6"></path></svg>
+</span>
+</button>
+
+</div>
+</div>
       </div>
       <div class="scroll" id="life-zhuli" hidden>
         <section class="card pad">
@@ -303,5 +520,51 @@
     </div>
     <div class="toast" id="toast" role="status" hidden></div>
   </div>
+<div class="wtterms jct-water" hidden="" id="wtTerms">
+<div class="wtterms-box">
+<h2 class="wtterms-h">用之前先读一下</h2>
+<div class="wtterms-body">
+<p><b>这不是官方功能。</b>本页功能是照 <b>WaterWidget</b>（nocookies111/life-798，MIT 许可）公开的说明自己写的，与它作者无关，也不代表慧生活798 官方。</p>
+<p><b>请只操作你本人有权使用的账户和设备</b>，并遵守平台的服务规则。</p>
+<p class="wtterms-h2">积分风险（原文照抄自那个项目）</p>
+<p>运行积分任务可能触发官方平台的限制或风控，请在使用前充分了解以下风险：</p>
+<p>1. 积分损失：账号积分可能被扣除、清零或冻结，已经获得的积分也可能无法继续使用。</p>
+<p>2. 无法获取积分：任务可能失败、奖励不到账，或长期无法继续获取积分；提示成功不代表实际到账。</p>
+<p>3. 账号风控：账号可能被限制登录、限制功能或冻结，具体处理以官方平台为准。</p>
+<p>请谨慎使用重要账号，优先通过官方渠道完成任务；出现异常时立即停止任务，并联系官方核实。</p>
+<p class="wtterms-h2">免责声明（原文照抄）</p>
+<p>按现状提供，不保证可用、准确或结果，风险自负；法律规定不得免除的责任不在此列。</p>
+<p class="wtterms-h2">另外几条</p>
+<p>· <b>不后台签到</b>：没有定时任务，不打开 App 就不会动你的账号。</p>
+<p>· <b>按次数跑</b>：平台让做几次就做几次，每次隔 30 秒，用完就停。</p>
+<p>· <b>跑完会核对</b>：平台说成功不等于到账，跑完会再读一次积分。</p>
+<p>· <b>充值和下单不做</b>：涉及钱的操作请去慧生活798 里做。</p>
+<p>· <b>接水不弹确认</b>：点了就出水扣钱，停止也一样。</p>
+</div>
+<button class="btn primary block" id="wtTermsOk">我已阅读，知道了</button>
+</div>
+</div>
+<div class="scan jct-water" hidden="" id="wtScan">
+<div class="scan-bar">
+<span>扫码添加饮水机</span>
+<button aria-label="关闭" class="scan-x" id="wtScanClose">
+<svg viewbox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"></path></svg>
+</button>
+</div>
+<div class="scan-stage">
+<video autoplay="" id="wtScanV" muted="" playsinline=""></video>
+<div class="scan-frm"></div>
+
+<div class="scan-wait" id="wtScanWait">
+<svg aria-hidden="true" viewbox="0 0 24 24">
+<path d="M4 8.6A2.6 2.6 0 0 1 6.6 6h1.5l1.2-1.8h5.4L15.9 6h1.5A2.6 2.6 0 0 1 20 8.6v7.8A2.6 2.6 0 0 1 17.4 19H6.6A2.6 2.6 0 0 1 4 16.4z"></path>
+<circle cx="12" cy="12.2" r="3.1"></circle>
+</svg>
+<span id="wtScanWaitT">正在打开相机…</span>
+</div>
+</div>
+<p class="scan-hint" id="wtScanTip">把二维码放进框里</p>
+<button class="scan-paste" id="wtScanPaste">粘贴二维码内容</button>
+</div>
 </body>
 </html>

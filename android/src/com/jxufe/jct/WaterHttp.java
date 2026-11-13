@@ -20,7 +20,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
-/** The HTTPS branch of hangyuantong NativeBridge.doReq (Hobson2233, MIT). */
+/** HTTPS transport verified against HangYuanTong 0.52.0 NativeBridge.doReq (MIT). */
 final class WaterHttp {
     private static final String HOST = "i.ilife798.com";
     private static final String API = "/api/v1";
@@ -74,12 +74,15 @@ final class WaterHttp {
         if (!isService(uri)) return false;
         String path = uri.getPath();
         if ("POST".equals(method)) {
-            return (API + "/acc/login/code").equals(path) || (API + "/acc/login").equals(path);
+            return (API + "/acc/login/code").equals(path) || (API + "/acc/login").equals(path)
+                    || (API + "/acc/score/score-send").equals(path) || (API + "/acc/score/score-use").equals(path);
         }
         if (!"GET".equals(method) || path == null || !path.startsWith(API + "/")) return false;
         switch (path.substring(API.length())) {
             case "/acc/wallet/owner":
             case "/acc/view-info":
+            case "/acc/score/acc-score":
+            case "/acc/score/mission-lst":
             case "/ui/app/master":
             case "/bill/lst-owner":
                 return true;
@@ -127,7 +130,8 @@ final class WaterHttp {
             String location = c.getHeaderField("Location");
             // Upstream's fallback is a GET. Restrict it to read-only 798 routes.
             if (code >= 300 && code < 400 && location != null && !location.isEmpty()
-                    && !url.getPath().startsWith(API + "/dev/")) {
+                    && !url.getPath().startsWith(API + "/dev/")
+                    && !url.getPath().startsWith(API + "/acc/score/score-")) {
                 URL next = new URL(finalUrl, location);
                 if (allowed("GET", Uri.parse(next.toString())) && !next.getPath().startsWith(API + "/dev/")) {
                     HttpURLConnection c2 = (HttpURLConnection) next.openConnection();
@@ -146,12 +150,14 @@ final class WaterHttp {
                 }
             }
 
-            if (debug && "POST".equals(method)) {
+            if (debug && "POST".equals(method) && url.getPath().startsWith(API + "/acc/login")) {
                 String phase = (API + "/acc/login/code").equals(url.getPath()) ? "sms" : "login";
                 int business = Integer.MIN_VALUE;
                 try { business = new JSONObject(text).optInt("code", Integer.MIN_VALUE); }
                 catch (org.json.JSONException ignored) { }
-                Log.d("JCTWater", phase + " http=" + code + " code="
+                String channel = headers != null && headers.contains("\"ApplicationType\":\"1,5\"")
+                        ? "score" : "device";
+                Log.d("JCTWater", phase + " channel=" + channel + " http=" + code + " code="
                         + (business == Integer.MIN_VALUE ? "none" : String.valueOf(business))
                         + " setCookie=" + (c.getHeaderField("Set-Cookie") != null
                                            || c.getHeaderField("Set-Cookie2") != null));
