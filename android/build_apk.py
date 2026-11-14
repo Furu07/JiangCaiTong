@@ -11,8 +11,8 @@ import zipfile
 
 ANDROID = Path(__file__).resolve().parent
 ROOT = ANDROID.parent
-VERSION = "0.9.1"
-VERSION_CODE = 36
+VERSION = "0.9.2"
+VERSION_CODE = 37
 MIN_SDK = 26
 TARGET_SDK = 33
 BUILD_TOOLS = "35.0.0"
@@ -68,9 +68,6 @@ def main():
     aapt = executable("aapt2", tools)
     align = executable("zipalign", tools)
 
-    app = (ROOT / "web" / "app.js").read_text(encoding="utf-8")
-    if not re.search(r"^const APP_VERSION = '" + re.escape(VERSION) + r"';$", app, re.M):
-        raise SystemExit("web/app.js 的版本与 Android 构建配置不一致。")
     # Use the supplied, authorized APK. Keep its client configuration out of Git.
     reference = ROOT / "base.apk"
     if not reference.is_file():

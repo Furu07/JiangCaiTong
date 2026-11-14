@@ -1,6 +1,5 @@
 'use strict';
 
-const APP_VERSION = '0.9.1';
 const $ = id => document.getElementById(id);
 const tabs = Array.from(document.querySelectorAll('[data-tab]'));
 const native = window.Android;
@@ -785,7 +784,7 @@ window.academicDisconnected = function (error) {
     for (const key of Object.keys(recordViews)) delete recordViews[key];
     for (const key of Object.keys(recordTerms)) delete recordTerms[key];
     renderTermOptions($('term').value.startsWith(schoolPrefix) ? '' : $('term').value);
-    showSchoolStatus();
+    updateAcademicViews();
     setAccountMessage('江财教务已断开。');
   } catch (failure) {
     setAccountMessage(failure.message);
@@ -809,6 +808,11 @@ function disconnectStudy() {
   refreshSession();
 }
 
+function connectAcademic() {
+  if (schoolTransport) receiveSchoolAuthorization(false);
+  else native.openAcademicBinding();
+}
+
 function renderAccounts() {
   $('clearWebCache').disabled = !native;
   if ($('page-accounts').hidden) return;
@@ -824,7 +828,7 @@ function renderAccounts() {
       : ['saved', 'verified'].includes(connection) ? '状态未知' : '未连接';
   const rows = [
     { id: 'school', name: '江西财经大学教务', state: native ? schoolState : '状态未知',
-      connect: () => $('academicBind').click(), disconnect: school.accountKey ? disconnectAcademic : null,
+      connect: connectAcademic, disconnect: school.accountKey ? disconnectAcademic : null,
       busy: schoolAuthorizing || academicDisconnecting || school.syncing },
     { id: 'study', name: '超星学习通', state: studyState,
       connect: openStudyLogin, disconnect: cx ? disconnectStudy : null, busy: studyBusy },
@@ -1018,30 +1022,16 @@ $('clearWebCache').addEventListener('click', () => {
 days.forEach((name, index) => $('day').add(new Option(name, index + 1)));
 $('scheduleSync').addEventListener('click', syncSchedule);
 $('term').addEventListener('change', () => loadSelectedTerm());
-$('academicBind').disabled = !native;
-$('academicBind').addEventListener('click', () => {
-  if (schoolTransport) receiveSchoolAuthorization(false);
-  else native.openAcademicBinding();
-});
-$('academicOfficial').disabled = !native;
-$('academicOfficial').addEventListener('click', () => {
-  native.openAcademicPortal();
-});
 $('previousWeek').addEventListener('click', () => { week--; renderSchedule(); });
 $('nextWeek').addEventListener('click', () => { week++; renderSchedule(); });
 $('week').addEventListener('change', event => { week = Number(event.target.value); renderSchedule(); });
 $('day').addEventListener('change', event => { day = Number(event.target.value); renderSchedule(); });
 $('weekView').addEventListener('click', () => { daily = false; renderSchedule(); });
 $('dayView').addEventListener('click', () => { daily = true; renderSchedule(); });
-$('appVersion').textContent = '版本 ' + APP_VERSION + ' · Debug';
 
 refreshSession();
-function showSchoolStatus() {
-  const state = schoolSync.snapshot();
-  $('academicBindingState').textContent = state.state === 'authorized' ? '本人课表授权已验证。'
-    : state.state === 'reauthorize' ? '教务会话已失效，已保留本机课表。请主动重新绑定。'
-    : state.state === 'unverified' ? '已显示本机课表，需要刷新时会核验教务会话。'
-    : '请绑定教务，完成校方认证后同步本人课表。';
+
+function updateAcademicViews() {
   renderAccounts();
   if (academicPanel !== 'timetable') renderAcademicRecords();
 }
@@ -1082,8 +1072,8 @@ async function renderAcademicRecords(force = false) {
   $('recordRefresh').disabled = true;
   const messages = {
     unavailable: '校方数据格式尚未核实，可在校方教务查看。',
-    'needs-auth': '请先在课表页完成教务授权。',
-    expired: '教务会话已失效，请主动重新绑定。',
+    'needs-auth': '请先在账号管理中连接教务。',
+    expired: '教务会话已失效，请在账号管理中重连。',
     empty: grades ? '暂无成绩。' : '暂无考试安排。',
     unpublished: grades ? '本学期成绩尚未发布。' : '本学期考试安排尚未公布。',
     network: '网络查询失败，请稍后重试。',
@@ -1203,11 +1193,7 @@ $('recordTerm').addEventListener('change', event => {
   renderAcademicRecords();
 });
 $('recordRefresh').addEventListener('click', () => renderAcademicRecords(true));
-$('recordBack').addEventListener('click', () => {
-  selectAcademicPanel('timetable');
-  $('academicBind').focus();
-  $('academicBind').scrollIntoView({ block: 'nearest' });
-});
+$('recordBack').addEventListener('click', openAccounts);
 $('recordPortal').addEventListener('click', () => { if (native) native.openAcademicBinding(); });
 
 function queueSchoolRead(action) {
@@ -1274,7 +1260,7 @@ function readSchoolPortal(termId, interactive) {
 
 async function receiveSchoolAuthorization(restore, manual = false) {
   if (!schoolTransport) {
-    showSchoolStatus();
+    updateAcademicViews();
     return;
   }
   if (academicDisconnecting || schoolAuthorizing || portalPending || (restore && !manual
@@ -1282,8 +1268,7 @@ async function receiveSchoolAuthorization(restore, manual = false) {
   const saved = schoolSync.snapshot();
   if (restore && (saved.state !== 'unverified' || !navigator.onLine || !native.academicOnline())) return;
   schoolAuthorizing = true;
-  $('academicBind').disabled = true;
-  $('academicBindingState').textContent = restore ? '正在刷新本人课表…' : '请在校方窗口完成认证。';
+  if (!restore && !$('page-accounts').hidden) setAccountMessage('请在校方窗口完成认证。');
   renderAccounts();
   let previousTerm = '';
   try {
@@ -1309,7 +1294,8 @@ async function receiveSchoolAuthorization(restore, manual = false) {
     if (selected) {
       renderTermOptions(schoolPrefix + selected, entry);
     }
-    showSchoolStatus();
+    updateAcademicViews();
+    if (!restore && !$('page-accounts').hidden) setAccountMessage('江财教务已连接。');
   } catch (error) {
     if (restore) {
       schoolVerificationFailed = true;
@@ -1319,12 +1305,11 @@ async function receiveSchoolAuthorization(restore, manual = false) {
       const selected = schoolSync.snapshot().selected;
       renderTermOptions(selected ? schoolPrefix + selected : '');
     }
-    $('academicBindingState').textContent = error.message;
-    if (!$('page-accounts').hidden) setAccountMessage(error.message);
-    if (academicPanel !== 'timetable') renderAcademicRecords();
+    if (!restore && !$('page-accounts').hidden) setAccountMessage(error.message);
+    else if (manual) toast(error.message);
+    updateAcademicViews();
   } finally {
     schoolAuthorizing = false;
-    $('academicBind').disabled = false;
     renderAccounts();
   }
 }
@@ -1367,21 +1352,7 @@ function completeSchoolPortal(capture, syncError, interactive) {
 
 window.academicBackgroundReturned = (capture, error) => completeSchoolPortal(capture, error, false);
 
-window.academicPortalReturned = function (structure, grid, capture, syncError) {
-  if (completeSchoolPortal(capture, syncError, true)) return;
-  const summary = $('academicStructure');
-  summary.hidden = !structure && !grid;
-  summary.textContent = structure ? '本机脱敏结构 · ' + structure : '';
-  if (grid) {
-    try {
-      const schedule = JufeAcademicAdapter.parseSchedule({ format: 'jufe-portal-grid', content: grid },
-        JufeAcademicAdapter.schoolParsers);
-      summary.textContent += '\n已读取并校验 ' + schedule.courses.length + ' 个上课时段，未写入缓存。';
-    } catch (error) {
-      summary.textContent += '\n' + error.message;
-    }
-  }
-};
+window.academicPortalReturned = (_structure, _grid, capture, error) => completeSchoolPortal(capture, error, true);
 
 async function refreshSchool(termId, manual) {
   const selected = schoolPrefix + termId;
@@ -1402,13 +1373,17 @@ async function refreshSchool(termId, manual) {
         $('scheduleStatus').textContent = '此学期尚无可用课表';
       }
     }
-    showSchoolStatus();
-    if (schoolSync.snapshot().state === 'unverified' && !schoolAuthorizing
-        && (manual || schoolSync.needsRefresh())) receiveSchoolAuthorization(true, manual);
+    updateAcademicViews();
+    const state = schoolSync.snapshot().state;
+    if (state === 'unverified' && !schoolAuthorizing && (manual || schoolSync.needsRefresh())) {
+      receiveSchoolAuthorization(true, manual);
+    } else if (manual && state === 'reauthorize') {
+      toast('教务会话已失效，请在账号管理中重连。');
+    }
   } catch (error) {
     if (error.code === 'account-changed') renderTermOptions('');
-    $('academicBindingState').textContent = error.message;
-    if (academicPanel !== 'timetable') renderAcademicRecords();
+    if (manual) toast(error.message);
+    updateAcademicViews();
   } finally {
     $('term').disabled = false;
     $('scheduleSync').disabled = false;
@@ -1439,13 +1414,11 @@ function loadSelectedTerm(entry) {
   const termId = $('term').value;
   const imported = termId.startsWith(importedPrefix);
   if (termId.startsWith(schoolPrefix)) {
-    $('academicRemove').hidden = true;
     $('scheduleSync').textContent = '刷新课表';
     if (entry) installSchedule(entry, entry.status === 'fresh' ? '已同步' : '本机缓存', '江财教务');
     else refreshSchool(termId.slice(schoolPrefix.length), false);
     return;
   }
-  $('academicRemove').hidden = !imported;
   $('scheduleSync').textContent = imported ? '读取本地课表' : '同步示例';
   if (imported) {
     const entry = importedSchedules.read(termId.slice(importedPrefix.length));
@@ -1464,72 +1437,10 @@ function loadSelectedTerm(entry) {
   }
 }
 
-$('academicFormat').addEventListener('change', event => {
-  $('academicImport').textContent = event.target.value === 'school' ? '检查原始样本' : '校验并导入';
-});
-let importing = false;
-$('academicImport').addEventListener('click', async () => {
-  if (importing) return;
-  const file = $('academicFile').files[0];
-  const pasted = $('academicPaste').value;
-  const status = $('academicImportStatus');
-  if (file && pasted.trim()) {
-    status.textContent = '请只使用一种导入方式，清空文件或粘贴内容后重试。';
-    return;
-  }
-  importing = true;
-  $('academicImport').disabled = true;
-  try {
-    const content = file ? await AcademicImport.readFile(file) : pasted;
-    const result = $('academicFormat').value === 'school'
-      ? AcademicImport.inspectSchoolSample(content)
-      : { schedule: AcademicImport.parse(content) };
-    if (!result.schedule) {
-      $('academicFile').value = '';
-      $('academicPaste').value = '';
-      status.textContent = result.summary + '。当前尚无对应的学校解析器，本次只检查结构，原课表保留。';
-      return;
-    }
-    const schedule = result.schedule;
-    try {
-      importedSchedules.save(schedule);
-    } catch (error) {
-      if (error.code !== 'empty-replacement') throw error;
-      if (!window.confirm('样本声明此学期没有课程。用空课表替换已有课表？')) {
-        status.textContent = error.message;
-        return;
-      }
-      importedSchedules.save(schedule, { replaceWithEmpty: true });
-    }
-    $('academicFile').value = '';
-    $('academicPaste').value = '';
-    renderTermOptions(importedPrefix + schedule.termId);
-    status.textContent = '已保存到本机 · ' + schedule.courses.length + ' 个上课时段';
-  } catch (error) {
-    status.textContent = error.message;
-  } finally {
-    importing = false;
-    $('academicImport').disabled = false;
-  }
-});
-
-$('academicRemove').addEventListener('click', () => {
-  const selected = $('term').value;
-  if (!selected.startsWith(importedPrefix) || !window.confirm('移除当前导入学期的本地课表？')) return;
-  const status = $('academicImportStatus');
-  try {
-    importedSchedules.remove(selected.slice(importedPrefix.length));
-    renderTermOptions();
-    status.textContent = '已移除本地导入课表';
-  } catch (error) {
-    status.textContent = error.message;
-  }
-});
-
 Academic.mockAdapter.listTerms().then(terms => {
   demoTerms = terms;
   const saved = schoolSync.snapshot().selected;
   renderTermOptions(saved ? schoolPrefix + saved : '');
-  if (!saved) showSchoolStatus();
+  if (!saved) updateAcademicViews();
 });
 scheduleStudyUpdates();

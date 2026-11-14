@@ -52,30 +52,6 @@
           </div>
         </div>
         <div id="schedule"></div>
-        <section class="card pad">
-          <h2>江财本科教务</h2>
-          <p class="sub">请在校方页面自行认证。Android 8 使用系统浏览器，Android 9 及以上可在独立窗口打开。</p>
-          <button class="btn primary" id="academicBind">绑定江西财经大学教务</button>
-          <button class="btn" id="academicOfficial">用系统浏览器打开</button>
-          <p class="sub" id="academicBindingState" role="status"></p>
-          <pre id="academicStructure" class="diagnostic-rows" hidden></pre>
-          <details id="academicImportPanel">
-            <summary>导入脱敏课表</summary>
-            <p class="sub">请先去除身份信息和凭据。JCT 格式可生成课表，学校原始样本可在本机检查结构。</p>
-            <label for="academicFormat">导入类型</label>
-            <select id="academicFormat">
-              <option value="exchange">JCT 交换格式</option>
-              <option value="school">学校原始 HTML / JSON 样本</option>
-            </select>
-            <label for="academicFile">选择文件</label>
-            <input type="file" id="academicFile" accept=".json,.html,.htm,.txt,application/json,text/html,text/plain">
-            <label for="academicPaste">或粘贴文本</label>
-            <textarea id="academicPaste" rows="4" maxlength="262144" autocomplete="off" spellcheck="false"></textarea>
-            <button class="btn primary" id="academicImport">校验并导入</button>
-            <button class="btn" id="academicRemove" hidden>移除当前导入</button>
-            <p class="sub" id="academicImportStatus" role="status"></p>
-          </details>
-        </section>
       </div>
       <div class="scroll" id="academic-records" hidden>
         <section class="card pad record-tools">
@@ -88,7 +64,7 @@
           <p class="sub status-note" id="recordStatus" role="status"></p>
           <div class="controls">
             <button class="btn" id="recordPortal" type="button">在校方教务查看</button>
-            <button class="btn" id="recordBack" type="button" hidden>前往课表绑定</button>
+            <button class="btn" id="recordBack" type="button" hidden>前往账号管理</button>
           </div>
         </section>
         <div id="recordResults"></div>
@@ -423,12 +399,6 @@
             <div><h3>网页缓存</h3><p class="sub">保留本机待办、账号和课表。</p></div>
             <button class="btn" id="clearWebCache">清理缓存</button>
           </div>
-        </section>
-        <section class="card pad">
-          <h2>酱菜通 · JiangCaiTong</h2>
-          <p>江西财经大学非官方 Android 校园助手。</p>
-          <p class="sub">基于航院通二次开发。MIT License · Copyright © 2026 Hobson</p>
-          <p class="sub" id="appVersion"></p>
         </section>
       </div>
     </main>
