@@ -34,27 +34,29 @@
         <button class="btn" type="button" data-academic="exams" aria-pressed="false">考试安排</button>
       </nav>
       <div class="scroll" id="academic-timetable">
-        <div class="card pad schedule-tools">
-          <div class="field-inline">
+        <div class="schedule-tools">
+          <div class="field-inline term-control">
             <label for="term">学期</label>
             <select id="term"></select>
           </div>
-          <p class="sub" id="scheduleStatus" role="status">正在读取课表…</p>
           <div class="week-controls">
             <button class="btn" id="previousWeek">上一周</button>
             <select id="week" aria-label="教学周"></select>
             <button class="btn" id="nextWeek">下一周</button>
           </div>
-          <div class="controls">
-            <button class="btn" id="weekView" aria-pressed="true">周视图</button>
-            <button class="btn" id="dayView" aria-pressed="false">日视图</button>
+          <div class="schedule-display">
+            <div class="view-switch" role="group" aria-label="课表视图">
+              <button class="btn" id="weekView" aria-pressed="true">周视图</button>
+              <button class="btn" id="dayView" aria-pressed="false">日视图</button>
+            </div>
             <select id="day" aria-label="星期" hidden></select>
           </div>
+          <p class="sub" id="scheduleStatus" role="status">正在读取课表…</p>
         </div>
         <div id="schedule"></div>
       </div>
       <div class="scroll" id="academic-records" hidden>
-        <section class="card pad record-tools">
+        <section class="record-tools">
           <h2 id="recordTitle"></h2>
           <div class="field-inline controls">
             <label for="recordTerm">教务学期</label>
@@ -73,7 +75,7 @@
     <main class="page" id="page-study" hidden>
       <header class="pagehead"><h1>学习</h1><button class="btn outline" id="studyRefresh" disabled>刷新课程</button></header>
       <div class="scroll">
-        <div class="card pad study-summary">
+        <div class="study-summary">
           <h2>学习通</h2>
           <p class="sub status-note" id="studyStatus" role="status"></p>
           <div class="controls">
@@ -102,7 +104,7 @@
     <main class="page" id="page-todo" hidden>
       <header class="pagehead"><h1>待办</h1><p class="sub" id="todoCount"></p></header>
       <div class="scroll">
-        <section class="card todo-add">
+        <section class="todo-add">
           <form id="todoForm" autocomplete="off">
             <div class="todo-input">
               <input id="todoTitle" maxlength="120" aria-label="待办标题" placeholder="添加待办…" required>
@@ -116,7 +118,7 @@
           <button class="btn" type="button" data-todo-filter="open" aria-pressed="true">未完成</button>
           <button class="btn" type="button" data-todo-filter="done" aria-pressed="false">已完成</button>
         </nav>
-        <section class="card" aria-label="待办事项">
+        <section class="todo-results" aria-label="待办事项">
           <div id="todoList"></div>
         </section>
       </div>
@@ -339,11 +341,11 @@
 </div>
       </div>
       <div class="scroll" id="life-zhuli" hidden>
-        <section class="card pad">
+        <section class="content-group">
           <h2>住理生活</h2>
           <p class="sub" id="zhuliProject">江西财经大学麦庐园校区洗浴、直饮水项目</p>
         </section>
-        <section class="card pad">
+        <section class="content-group">
           <h2>洗浴设备</h2>
           <p class="sub status-note" id="zhuliDeviceStatus" role="status"></p>
           <p class="sub" id="zhuliDeviceTime"></p>
@@ -366,7 +368,7 @@
             </div>
           </div>
         </section>
-        <section class="card pad">
+        <section class="content-group">
           <h2>官方服务</h2>
           <p class="sub" id="zhuliStatus" role="status"></p>
           <p class="sub">在官方 App 连接设备，或查看余额和使用记录。</p>
@@ -379,13 +381,13 @@
     <main class="page" id="page-me" hidden>
       <header class="pagehead"><h1>我的</h1></header>
       <div class="scroll">
-        <section class="card pad">
+        <section class="content-group">
           <button class="account-entry" id="accountsOpen" type="button">
             <span><strong>账号管理</strong><span class="sub">管理教务、学习通和生活服务</span></span>
             <span aria-hidden="true">›</span>
           </button>
         </section>
-        <section class="card pad">
+        <section class="content-group">
           <h2>应用设置</h2>
           <div class="setting-row">
             <label for="appTheme">外观</label>
@@ -405,7 +407,7 @@
     <main class="page" id="page-accounts" hidden>
       <header class="pagehead"><h1>账号管理</h1><button class="btn" id="accountsBack" type="button">返回</button></header>
       <div class="scroll">
-        <section class="card pad" id="accountsList" aria-label="服务账号"></section>
+        <section class="settings-list" id="accountsList" aria-label="服务账号"></section>
         <p class="sub status-note" id="accountsStatus" role="status" hidden></p>
         <section class="card pad" id="studyCredentials" hidden>
           <h2>连接学习通</h2>
@@ -479,13 +481,15 @@
           <button class="sheet-x" id="todoCancel" type="button" aria-label="关闭">×</button>
         </header>
         <form id="todoEditForm" autocomplete="off">
-          <label for="todoEditTitle">标题</label>
-          <input id="todoEditTitle" maxlength="120" required>
-          <label for="todoNotes">备注</label>
-          <textarea id="todoNotes" rows="3" maxlength="1000"></textarea>
-          <label for="todoDue">截止日期</label>
-          <input id="todoDue" type="date">
-          <p class="sub status-note" data-tone="error" id="todoEditStatus" role="status"></p>
+          <div class="todo-fields">
+            <label for="todoEditTitle">标题</label>
+            <input id="todoEditTitle" maxlength="120" required>
+            <label for="todoNotes">备注</label>
+            <textarea id="todoNotes" rows="3" maxlength="1000"></textarea>
+            <label for="todoDue">截止日期</label>
+            <input id="todoDue" type="date">
+            <p class="sub status-note" data-tone="error" id="todoEditStatus" role="status"></p>
+          </div>
           <div class="controls" id="todoEditActions">
             <button class="btn danger" id="todoDelete" type="button">删除</button>
             <button class="btn primary" type="submit">保存</button>

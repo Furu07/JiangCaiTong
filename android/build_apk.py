@@ -11,8 +11,8 @@ import zipfile
 
 ANDROID = Path(__file__).resolve().parent
 ROOT = ANDROID.parent
-VERSION = "0.9.2"
-VERSION_CODE = 37
+VERSION = "0.9.3"
+VERSION_CODE = 38
 MIN_SDK = 26
 TARGET_SDK = 33
 BUILD_TOOLS = "35.0.0"

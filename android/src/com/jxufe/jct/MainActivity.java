@@ -78,7 +78,7 @@ public class MainActivity extends Activity {
         settings.setAllowContentAccess(false);
         settings.setSaveFormData(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-        settings.setUserAgentString(settings.getUserAgentString() + " JiangCaiTong/0.9.2");
+        settings.setUserAgentString(settings.getUserAgentString() + " JiangCaiTong/0.9.3");
         if (android.os.Build.VERSION.SDK_INT >= 33) settings.setAlgorithmicDarkeningAllowed(false);
         bridge = new NativeBridge(web);
         web.addJavascriptInterface(bridge, "Android");
@@ -208,9 +208,9 @@ public class MainActivity extends Activity {
     }
 
     void applyUiTheme(boolean dark) {
-        int background = Color.parseColor(dark ? "#121b17" : "#f3f6f4");
+        int background = Color.parseColor(dark ? "#262624" : "#faf9f5");
         getWindow().setStatusBarColor(background);
-        getWindow().setNavigationBarColor(Color.parseColor(dark ? "#1c2922" : "#ffffff"));
+        getWindow().setNavigationBarColor(Color.parseColor(dark ? "#2e2e2a" : "#f5f4ed"));
         if (web != null) web.setBackgroundColor(background);
         getWindow().getDecorView().setSystemUiVisibility(dark ? 0 :
                 View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);

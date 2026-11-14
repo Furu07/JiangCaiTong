@@ -1,21 +1,17 @@
 /* HangYuanTong 0.52.0 water styles, limited to the Life water page. MIT. */
 .jct-water {
-  --accent-glow: var(--accent-soft);
-  --accent-grad: var(--accent);
   --active: var(--accent-soft);
   --bad: var(--danger);
   --danger-btn: var(--danger);
   --danger-fill: var(--danger-bg);
   --danger-text: var(--danger);
+  --danger-on: var(--primary-ink);
   --ease-soft: ease-out;
-  --gap-card: 10px;
   --ok: var(--success);
   --primary: var(--accent);
   --r: var(--radius);
   --r-ctl: var(--control-radius);
   --rule: var(--line);
-  --shadow-card: var(--shadow-sheet);
-  --warn-line: var(--warn);
   --warn-text: var(--warn);
 }
 .jct-water-dialog {
@@ -29,10 +25,7 @@
 }
 .jct-water-dialog input { display: block; width: 100%; margin-bottom: 8px; }
 .jct-water-dialog .btn { margin: 4px; }
-.jct-water-dialog::backdrop { background: #0007; }
-.jct-water > .card, .jct-water #waterOn > .card, .jct-water #waterOff > .card {
-  margin-bottom: 10px;
-}
+.jct-water-dialog::backdrop { background: var(--scrim); }
 .jct-water .btn,
 .jct-water .row.tap {
   touch-action: manipulation;
@@ -41,49 +34,23 @@
   -webkit-user-select: none; user-select: none;
   -webkit-touch-callout: none;
 }
-.jct-water .btn {
-  height: 46px; padding: 0 20px; border: 0; border-radius: var(--r-ctl);
-  font-size: 15px; font-weight: 600; font-family: inherit;
-  background: var(--rule); color: var(--text);
-
-  transition: transform .12s var(--ease-soft), opacity .12s var(--ease-soft);
-}
-.jct-water .btn.primary {
-  background: var(--accent-grad); color: var(--primary-ink);
-  box-shadow: var(--accent-glow);
-}
-.jct-water .btn.danger { background: var(--danger-btn); color: #fff; }
-.jct-water .btn.block { width: 100%; display: block; }
-.jct-water .btn:active:not([disabled]) { opacity: .85; transform: scale(.98); }
-.jct-water .btn[disabled] { opacity: .55; }
+.jct-water .btn.block { width: 100%; }
 .jct-water .wtExBtns { display: flex; gap: 8px; margin-top: 2px; }
 .jct-water .wtExBtns .btn { flex: 1 1 0; min-width: 0; padding: 0 12px; }
 .jct-water .wtautoex { padding: 0; border-bottom: 0; min-height: 40px; margin-top: 4px; }
 .jct-water .wtautoex .k { font-size: 13px; color: var(--sub); }
+#life-water > .controls { margin: 0 0 12px; justify-content: end; }
 .jct-water .card {
-
-  background: #ffffff;
-  background-image:
-    linear-gradient(160deg, #ffffff 0%, #fbfdff 100%);
-  border-radius: var(--r);
-  box-shadow: 0 0 0 .5px rgba(23, 54, 102, .055), var(--shadow-card);
-  margin-bottom: var(--gap-card); overflow: hidden;
-}
-@media (prefers-color-scheme: dark) {
-.jct-water .card {
-    background: rgba(23, 36, 60, .72);
-    border-color: rgba(255, 255, 255, .09);
-    background-image:
-      linear-gradient(135deg, rgba(255, 255, 255, .06) 0%, rgba(255, 255, 255, 0) 46%);
-  }
+  border: 0; border-bottom: 1px solid var(--line); border-radius: 0;
+  background: transparent; margin: 0 0 12px;
 }
 .jct-water .row {
   display: flex; align-items: center; justify-content: space-between;
-  gap: 12px; padding: 12px 16px;
+  gap: 12px; padding: 12px 0;
 
   min-height: 44px;
   border-bottom: .5px solid var(--line);
-  font-size: 15px; width: 100%;
+  font-size: 15px; width: 100%; min-width: 0;
   background: transparent; border-left: 0; border-right: 0; border-top: 0;
   color: var(--text); font-family: inherit; text-align: left;
 }
@@ -129,7 +96,7 @@
 .jct-water .todohd { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
 .jct-water .todotitle { flex: 1 1 auto; font-size: 15px; font-weight: 600; }
 .jct-water .todobtn {
-  flex: 0 0 auto; height: 32px; padding: 0 12px;
+  flex: 0 0 auto; min-height: 44px; padding: 0 12px;
   border: 1px solid var(--line-strong); border-radius: 999px;
   background: transparent; color: var(--accent);
   font-family: inherit; font-size: 13px; font-weight: 500;
@@ -144,7 +111,7 @@
 .jct-water .todobtn.solid:disabled { background: var(--fill); color: var(--sub); }
 .jct-water .todobtn.solid:active:not(:disabled) { background: var(--primary); opacity: .82; }
 .jct-water .taskopen {
-  flex: 1 1 auto; min-width: 0; min-height: 32px;
+  flex: 1 1 auto; min-width: 0; min-height: 44px;
   display: flex; align-items: center; gap: 8px;
   padding: 0; margin: 0; background: none; border: 0;
   font: inherit; color: inherit; text-align: left;
@@ -157,10 +124,10 @@
 .jct-water .field input {
   width: 100%; height: 44px; padding: 0 12px;
   border: 1px solid var(--line-strong); border-radius: var(--r-ctl);
-  background: var(--bg); color: var(--text);
-  font-size: 15px; font-family: inherit;
+  background: var(--card); color: var(--text);
+  font-size: 16px; font-family: inherit;
 }
-.jct-water .field input:focus { outline: none; border-color: var(--accent); }
+.jct-water .field input:focus { border-color: var(--accent); }
 .jct-water .pwdlost {
   display: flex; align-items: center;
   min-height: 32px; margin: -6px 0 14px; padding: 0;
@@ -169,11 +136,8 @@
 }
 .jct-water .pwdlost::after { content: "›"; margin-left: 4px; font-size: 15px; opacity: .7; }
 .jct-water .warncard {
-  background: var(--warn-bg);
-  border: 1px solid var(--warn-line);
-  color: var(--warn-text);
-
-  padding: 14px 16px;
+  background: var(--warn-bg); border: 1px solid var(--line); border-radius: var(--r);
+  color: var(--warn-text); padding: 14px 16px;
 }
 .jct-water .warncard h2 { font-size: 15px; margin: 0 0 4px; font-weight: 600; color: var(--warn-text); }
 .jct-water .warncard .sub { color: var(--warn-text); opacity: .82; margin: 0 0 12px; }
@@ -207,7 +171,7 @@
   border: 0; border-radius: 9px; background: var(--rule);
   font-family: inherit; font-size: 14px; font-weight: 600; color: var(--text);
 }
-.jct-water.wtpop-btn.danger { background: var(--danger-btn); color: #fff; }
+.jct-water.wtpop-btn.danger { background: var(--danger-btn); color: var(--danger-on); }
 .jct-water.wtpop-btn:active { opacity: .85; }
 .jct-water.scan {
   position: fixed; inset: 0; z-index: 70; background: #000;
@@ -316,11 +280,12 @@
 .jct-water .wtadd-hd .wt-ico svg { width: 28px; height: 28px; padding: 5px; }
 .jct-water .wtoff {
   margin: 0 4px 8px; padding: 6px 10px;
-  background: var(--warn-bg); border: 1px solid var(--warn-line);
+  background: var(--warn-bg); border: 1px solid var(--line);
   border-radius: var(--r-ctl); color: var(--warn-text);
   font-size: 13px; line-height: 1.5;
 }
-.jct-water .wtpad { padding: 8px 16px 8px; }
+.jct-water .wtpad { padding: 10px 0 14px; }
+#waterOff .wtpad { padding-bottom: 16px; }
 .jct-water .wtpad > h2 {
   font-size: 17px; font-weight: 600; letter-spacing: -.2px; margin: 0 0 4px;
 }
@@ -337,7 +302,7 @@
 }
 .jct-water .wtbal-v {
   flex: 0 0 auto;
-  font-size: 34px; font-weight: 600; line-height: 1.1;
+  font-family: var(--heading-font); font-size: 38px; font-weight: 600; line-height: 1.1;
   letter-spacing: -.6px; margin: 8px 0;
 
   font-variant-numeric: tabular-nums;
@@ -410,7 +375,7 @@
 }
 .jct-water .wtdev-go:active { background: var(--active); }
 .jct-water .wtdev-go.stop {
-  background: var(--danger-btn); border-color: var(--danger-btn); color: #fff;
+  background: var(--danger-btn); border-color: var(--danger-btn); color: var(--danger-on);
 }
 .jct-water .wtdev-go.stop:active { opacity: .82; background: var(--danger-btn); }
 .jct-water .wtdev-go:disabled { opacity: .66; }
@@ -516,7 +481,7 @@
 }
 .jct-water .wtrun-fill {
   display: block; height: 100%; width: 0; border-radius: 999px;
-  background: var(--accent-grad);
+  background: var(--accent);
   transition: width .28s ease;
 }
 .jct-water .wtrun-sub { margin: 8px 0 0; font-size: 12px; color: var(--sub); }
@@ -566,7 +531,7 @@
 .jct-water #wtAccounts .tip { margin-top: 10px; }
 .jct-water.wtterms {
   position: fixed; inset: 0; z-index: 60;
-  background: rgba(0, 0, 0, .55);
+  background: var(--scrim);
   display: flex; align-items: center; justify-content: center;
   padding: 16px;
 }
@@ -590,73 +555,17 @@
   font-size: 13px; font-weight: 600; color: var(--text);
 }
 .jct-water.wtterms-box .btn { margin-top: 12px; flex: 0 0 auto; }
-.jct-water .card { margin-bottom: 6px; }
-.jct-water .wtboxin { padding: 0 16px 8px; }
-.jct-water .wtmission { padding: 7px 0; }
-.jct-water .wtbill { padding: 8px 0; }
-.jct-water .wtmission-l { font-size: 11px; }
-.jct-water .acc-note { margin: 6px 2px 0; font-size: 11px; line-height: 1.5; }
-.jct-water .tip.note {
-  font-size: 11px; line-height: 1.45;
-  margin: 6px 0 0; min-height: 0;
+.jct-water .wtboxin { padding: 0 0 12px; }
+.jct-water .wtmission, .jct-water .wtbill { padding: 8px 0; }
+.jct-water .acc-note { margin: 8px 0 0; color: var(--sub); font-size: 12px; }
+.jct-water .tip.note { margin: 6px 0 0; min-height: 0; }
+.jct-water .card > .wtbal {
+  padding: 16px 14px 12px; margin-bottom: 4px;
+  border: 1px solid var(--line); border-radius: var(--r); background: var(--row-bg);
 }
-.jct-water .row { position: relative; border-bottom: 0; }
-.jct-water .row::after {
-  content: ""; position: absolute; left: 16px; right: 16px; bottom: 0;
-  height: .5px; background: var(--line); pointer-events: none;
-}
-.jct-water .row:last-child::after { display: none; }
-.jct-water .wtpad .row::after { left: 0; right: 0; }
-.jct-water .field input {
-  background: #fff;
-  border: .5px solid rgba(23, 54, 102, .10);
-  box-shadow: 0 1px 2px rgba(23, 54, 102, .04);
-}
-.jct-water .field input:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(47, 107, 238, .14);
-}
-@media (prefers-color-scheme: dark) {
-.jct-water .field input {
-    background: rgba(255, 255, 255, .045);
-    border-color: rgba(255, 255, 255, .10);
-    box-shadow: none;
-  }
-.jct-water .field input:focus {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px rgba(90, 140, 255, .20);
-  }
-}
-.jct-water .card > .row {
-  background: var(--row-bg);
-  border-radius: var(--r-ctl);
-  margin: 0 8px;
-  padding: 9px 14px;
-}
-.jct-water .card > .row + .row { margin-top: 4px; }
-.jct-water .card > .row:first-child { margin-top: 6px; }
-.jct-water .card > .row:last-child { margin-bottom: 6px; }
-.jct-water .card > .row::after { display: none; }
-.jct-water .row .k { font-weight: 500; }
-.jct-water .wtpad > .row {
-  background: transparent; margin: 0; padding: 12px 0;
-}
-.jct-water .wtpad > .row + .row { margin-top: 0; }
-.jct-water .wtpad > .row::after { display: block; left: 0; right: 0; }
-.jct-water .card { margin-bottom: 6px; }
-.jct-water .card > .row { padding-top: 8px; padding-bottom: 8px; }
-.jct-water .card > .row:only-child {
-  margin: 0; padding: 10px 16px;
-  background: transparent; border-radius: 0;
-}
-.jct-water #wtBillOpen {
-  margin-left: 0; margin-right: 0;
-  background: transparent; padding: 10px 16px;
-}
-.jct-water .card > .wtbal { padding: 10px 16px 6px; }
 .jct-water .wtstrip {
   display: flex; align-items: center; gap: 10px;
-  padding: 8px 16px; min-height: 44px;
+  padding: 8px 0; min-height: 44px;
   border-top: .5px solid var(--line);
 }
 .jct-water .wtstrip-t {

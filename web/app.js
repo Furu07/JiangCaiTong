@@ -163,7 +163,7 @@ function renderSchedule() {
     target.appendChild(node('p', '此学期的课表数据为空。', 'card pad sub'));
     return;
   }
-  const grid = node('div', null, daily ? 'day-schedule card pad' : 'week-schedule card');
+  const grid = node('div', null, daily ? 'day-schedule' : 'week-schedule');
   const visibleDays = daily ? [day] : [1, 2, 3, 4, 5, 6, 7];
   const today = new Date().toLocaleDateString('sv-SE');
   visibleDays.forEach(weekday => {
@@ -489,7 +489,7 @@ function cxPaintTodo(courses) {
   const items = selected.map(task => ({ ...task.item, courseId: task.course.courseId,
     classId: task.course.classId, course: task.course.title, courseRecord: task.course, taskState: task.state }));
   const ordered = Learning.sortItems(items);
-  const list = node('div', null, 'card task-list');
+  const list = node('div', null, 'task-list');
   if (!selected.length) list.appendChild(node('p', '当前筛选下没有任务。', 'empty-state'));
   if (studyFilter.order === 'course') {
     for (const group of Learning.groupByCourse(ordered)) {
@@ -540,11 +540,11 @@ function renderStudy() {
   const active = studyCache.courses.filter(course => !StudyActivity.hiddenReason(studyCache.updates[courseKey(course)]));
   cxPaintTodo(active);
   if (studyCache.at) {
-    const card = node('section', null, 'card study-course-list');
+    const card = node('section', null, 'study-course-list');
     const hiddenCount = studyCache.courses.length - active.length;
     content.appendChild(sectionHeading('活跃课程', active.length + ' 门'));
     if (!active.length) card.appendChild(node('p', hiddenCount ? '课程可在下方的隐藏列表查看。' : '暂无课程记录。', 'empty-state'));
-    const folded = node('details', null, 'card study-hidden result-group');
+    const folded = node('details', null, 'study-hidden result-group');
     folded.open = showInactiveStudyCourses;
     folded.appendChild(node('summary', '已隐藏课程 · ' + hiddenCount + ' 门'));
     folded.addEventListener('toggle', () => { showInactiveStudyCourses = folded.open; });
@@ -1145,7 +1145,7 @@ async function renderAcademicRecords(force = false) {
   if (reuse && previous.term === selectedTerm && previous.rows === displayed.rows) return;
   const scrollTop = reuse && previous.term === selectedTerm ? $('academic-records').scrollTop : 0;
   const card = node('div');
-  let group = node('section', null, 'card pad');
+  let group = node('section', null, 'record-list');
   if (grades) card.appendChild(group);
   const rows = displayed.rows.slice();
   const today = new Date().toLocaleDateString('sv-SE');
@@ -1156,7 +1156,7 @@ async function renderAcademicRecords(force = false) {
   rows.forEach(item => {
     const date = item.date || '';
     if (!grades && date !== previousDate) {
-      group = node('section', null, 'card pad exam-day');
+      group = node('section', null, 'record-list exam-day');
       group.appendChild(node('h2', upcoming(item) ? '即将考试 · ' + item.date : item.date || '日期待定'));
       card.appendChild(group);
       previousDate = date;
