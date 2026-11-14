@@ -1,0 +1,14 @@
+\begin{tikzpicture}
+\node[block,text width=37mm] (scan) at (-5.2,0) {有效会话\\扫描教学班与分项任务};
+\node[block,text width=40mm] (merge) at (0,0) {解析、去重、归并\\失败分项保留旧结果};
+\node[block,text width=39mm] (observe) at (5.2,0) {检查作业和通知\\时间、标识及完整性};
+\node[block,text width=37mm] (view) at (-5.2,-2.1) {按类型、状态或课程\\筛选并展示可见任务};
+\node[block,text width=40mm] (cache) at (0,-2.1) {按账号保存任务及\\活动证据和可见状态};
+\node[block,text width=39mm] (state) at (5.2,-2.1) {超期隐藏，有新内容恢复\\证据不足时保留原状态};
+\draw[flow] (scan) -- (merge);
+\draw[flow] (merge) -- (observe);
+\draw[flow] (observe) -- (state);
+\draw[flow] (state) -- (cache);
+\draw[flow] (cache) -- (view);
+\draw[flow] (cache.south) -- (0,-3.45) -- node[note,midway,below] {到期后隐藏项也参与复查} (-7.4,-3.45) |- (scan.west);
+\end{tikzpicture}

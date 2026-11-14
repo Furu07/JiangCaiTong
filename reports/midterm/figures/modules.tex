@@ -1,0 +1,13 @@
+\begin{tikzpicture}
+\node[block,text width=46mm] (app) at (0,0) {酱菜通};
+\foreach \x/\name/\content in {
+  -5.86/a/{教务\\课表\\成绩与考试},
+  -2.93/b/{学习\\任务筛选\\课程活跃度},
+  0/c/{待办\\编辑与完成\\离线保存},
+  2.93/d/{生活\\798 饮水\\住理生活},
+  5.86/e/{我的\\账号管理\\外观与缓存}
+}{
+  \node[block,text width=24mm,minimum height=22mm,font=\footnotesize] (\name) at (\x,-2.1) {\content};
+  \draw[flow] (app.south) -- (0,-1.0) -| (\name.north);
+}
+\end{tikzpicture}

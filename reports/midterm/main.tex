@@ -1,0 +1,82 @@
+\documentclass[a4paper,UTF8,zihao=-4,fontset=fandol]{ctexart}
+\usepackage[a4paper,top=25mm,bottom=25mm,left=25mm,right=25mm]{geometry}
+\usepackage{graphicx,booktabs,tabularx,array,xcolor,tikz}
+\usetikzlibrary{arrows.meta,positioning}
+\usepackage{caption}
+\usepackage[backend=biber,style=numeric,sorting=none,giveninits=true,doi=false,isbn=false]{biblatex}
+\addbibresource{references.bib}
+\usepackage[hidelinks,pdfencoding=auto]{hyperref}
+\hypersetup{pdftitle={酱菜通——面向江西财经大学的校园学习与生活服务整合应用设计与实现}}
+\definecolor{Ink}{HTML}{242A30}
+\definecolor{Slate}{HTML}{404B56}
+\definecolor{Rule}{HTML}{A2ADB6}
+\definecolor{Paper}{HTML}{F2F5F6}
+\usepackage{needspace,placeins}
+\urlstyle{same}
+\ctexset{section={format=\Large\heiti\bfseries\color{Ink},name={第,章},number=\chinese{section},aftername=\quad,beforeskip=16pt,afterskip=9pt},subsection={format=\large\heiti\color{Ink},beforeskip=10pt,afterskip=5pt}}
+\setlength{\textfloatsep}{14pt plus 3pt minus 3pt}
+\setlength{\intextsep}{12pt plus 3pt minus 3pt}
+\captionsetup{font=small,labelfont=bf,skip=6pt,labelsep=quad}
+\setlength{\parindent}{2em}
+\linespread{1.27}
+\setlength{\emergencystretch}{2em}
+\renewcommand{\arraystretch}{1.24}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\graphicspath{{figures/}}
+\tikzset{
+  block/.style={draw=Rule,rounded corners=2pt,fill=Paper,text=Ink,align=center,minimum height=12mm,font=\small,inner sep=4pt},
+  link/.style={draw=Slate,semithick,rounded corners=2pt},
+  flow/.style={-{Stealth[length=2mm]},semithick,draw=Slate,rounded corners=2pt},
+  note/.style={font=\footnotesize,text=Slate,align=center,fill=white,inner sep=2pt}
+}
+% 封面个人信息。
+\newcommand{\studentname}{\rule{65mm}{0.4pt}}
+\newcommand{\studentid}{\rule{65mm}{0.4pt}}
+\newcommand{\courseinfo}{低代码应用开发}
+
+\begin{document}
+\hypersetup{pageanchor=false}
+\begin{titlepage}
+\centering
+\vspace*{30mm}
+{\Large\heiti 江西财经大学\par}
+\vspace{15mm}
+{\LARGE\heiti 个人项目中期实验报告\par}
+\vspace{12mm}
+{\color{Rule}\rule{0.82\textwidth}{0.5pt}\par}
+\vspace{9mm}
+{\zihao{1}\heiti 酱菜通\par}
+\vspace{5mm}
+{\zihao{3}\heiti 面向江西财经大学的校园学习与生活服务整合应用\par}
+\vspace{2mm}
+{\zihao{3}\heiti 设计与实现\par}
+\vspace{19mm}
+\begin{tabular}{r@{\hspace{1em}}p{65mm}}
+学生姓名 & \studentname \\[5mm]
+学\hspace{2em}号 & \studentid \\[5mm]
+课\hspace{2em}程 & \courseinfo
+\end{tabular}
+\vfill
+{\small 2026 年 11 月\par}
+\end{titlepage}
+
+\pagenumbering{arabic}
+\linespread{1.25}\selectfont
+\hypersetup{pageanchor=true}
+\input{sections/01-context}
+\input{sections/02-design}
+\input{sections/03-implementation}
+\input{sections/04-iteration}
+\FloatBarrier
+\input{sections/05-validation}
+\FloatBarrier
+\Needspace{15\baselineskip}
+\input{sections/06-reflection}
+\Needspace{8\baselineskip}
+\begingroup
+\small
+\linespread{1.12}\selectfont
+\setlength{\bibitemsep}{2pt}
+\printbibliography[heading=bibliography,title={参考资料}]
+\endgroup
+\end{document}

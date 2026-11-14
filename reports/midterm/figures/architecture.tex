@@ -1,0 +1,14 @@
+\begin{tikzpicture}
+\node[block,text width=91mm] (web) at (0,0) {应用主界面 WebView\\操作、业务模型与结果展示};
+\node[block,text width=43mm] (bridge) at (-4.05,-1.8) {Java 原生桥接\\受控请求与结果回调};
+\node[block,text width=43mm] (portal) at (4.05,-1.8) {独立教务 WebView\\主动认证与后台页面读取};
+\node[block,text width=42mm] (store) at (0,-3.6) {本机存储\\缓存、待办和原生凭据};
+\node[block,text width=35mm] (vendor) at (-5.35,-3.6) {学习通／798};
+\node[block,text width=35mm] (school) at (5.35,-3.6) {江财教务门户};
+\draw[flow,<->] (web.south -| bridge.north) -- (bridge.north);
+\draw[flow,<->] (web.south -| portal.north) -- (portal.north);
+\draw[flow,<->] (web.south) -- node[note,right,pos=.63] {业务数据} (store.north);
+\draw[flow,<->] (bridge.south) -- ++(0,-3mm) -| (vendor.north);
+\draw[flow,<->] (portal.south) -- ++(0,-3mm) -| (school.north);
+\draw[flow,<->] (bridge.east) -| node[note,above,pos=.27] {凭据} ([xshift=-10mm]store.north);
+\end{tikzpicture}

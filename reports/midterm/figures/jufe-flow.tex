@@ -1,0 +1,16 @@
+\begin{tikzpicture}
+\node[block,text width=37mm] (open) at (-5.2,0) {进入教务或手动刷新};
+\node[block,text width=40mm] (cache) at (0,0) {回读同账号、同学期\\最近可用课表};
+\node[block,text width=39mm] (decide) at (5.2,0) {检查会话与刷新条件};
+\node[block,text width=39mm] (read) at (5.2,-2.0) {后台读取个人课表};
+\node[block,text width=40mm] (check) at (0,-2.0) {核验账号、学期与结构};
+\node[block,text width=37mm] (save) at (-5.2,-2.0) {保存结果并更新页面};
+\node[block,text width=62mm] (keep) at (0,-4.15) {保留可用课程与同步状态\\确认会话失效时提示主动重连};
+\draw[flow] (open) -- (cache);
+\draw[flow] (cache) -- (decide);
+\draw[flow] (decide) -- node[note,right] {允许刷新} (read);
+\draw[flow] (read) -- (check);
+\draw[flow] (check) -- node[note,above] {通过} (save);
+\draw[flow] (check) -- node[note,left] {读取或校验失败} (keep);
+\draw[flow] (decide.east) -- ++(3.5mm,0) |- node[note,pos=.84,above] {无需刷新或会话失效} (keep.east);
+\end{tikzpicture}

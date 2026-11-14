@@ -1,0 +1,7 @@
+\begin{tikzpicture}
+\node[block,text width=29mm,minimum height=21mm] (a) at (-6,0) {\textbf{初步设计}\\客户端与课表模型};
+\node[block,text width=29mm,minimum height=21mm] (b) at (-2,0) {\textbf{教务接入}\\课表同步\\会话处理完善};
+\node[block,text width=29mm,minimum height=21mm] (c) at (2,0) {\textbf{核心业务完善}\\待办、任务管理\\饮水服务查询};
+\node[block,text width=29mm,minimum height=21mm] (d) at (6,0) {\textbf{使用流程整合}\\集中管理账号\\统一界面设计};
+\foreach \first/\last in {a/b,b/c,c/d}{\draw[flow] (\first) -- (\last);}
+\end{tikzpicture}
