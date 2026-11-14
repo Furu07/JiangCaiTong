@@ -7,7 +7,7 @@ const activitySource = fs.readFileSync(require.resolve('../web/study-activity.js
 const moduleContext = { window: {} };
 vm.runInNewContext(activitySource, moduleContext);
 const Activity = moduleContext.window.StudyActivity;
-const { update, hiddenReason, setVisibility, dueCourses } = Activity;
+const { update, hiddenReason, setVisibility, needsFullCheck } = Activity;
 const day = 86400000;
 const now = Date.UTC(2026, 10, 11);
 const notices = (...items) => ({ title: '活动', complete: true, items });
@@ -74,19 +74,20 @@ test('manual hiding survives updates, while always-visible and restore are expli
   assert.equal(hiddenReason(setVisibility(newer, 'restore', now + day)), '');
 });
 
-test('hidden courses remain due after 12 hours and can be refreshed immediately', () => {
-  const courses = [{ key: 'recent' }, { key: 'hidden' }];
+test('hidden courses become eligible for a full check after 12 hours', () => {
   const records = { recent: update(null, old, now + day / 4), hidden: update(null, old, now) };
-  assert.equal(dueCourses(courses, records, c => c.key, now + day / 2 - 1).length, 0);
-  assert.equal(dueCourses(courses, records, c => c.key, now + day / 2)[0].key, 'hidden');
-  assert.equal(dueCourses(courses, records, c => c.key, now + day / 4, true).length, 2);
+  assert.equal(needsFullCheck(records.hidden, now + day / 2 - 1), false);
+  assert.equal(needsFullCheck(records.hidden, now + day / 2), true);
+  assert.equal(needsFullCheck(records.recent, now + day / 2), false);
 });
 
 const app = fs.readFileSync(require.resolve('../web/app.js'), 'utf8');
-const studyCode = app.slice(app.indexOf('const studyKeyPrefix'), app.indexOf('let waterBusy'));
-function studyContext(storage, session, readCourse) {
+const studyCode = app.slice(app.indexOf('const studyKeyPrefix'), app.indexOf('function openAccounts'));
+function studyContext(storage, session, scan) {
   const context = vm.createContext({
-    StudyActivity: Activity, Learning: { readCourse }, window: { addEventListener() {} },
+    StudyActivity: Activity, Learning: { scan, restore: () => session.scope }, window: { addEventListener() {} },
+    $: () => ({ textContent: '', hidden: true }),
+    schoolSync: { snapshot: () => ({ terms: [] }) }, refreshSession() {},
     document: { hidden: false, addEventListener() {} }, navigator: { onLine: true },
     native: { cxSessionKey: () => session.scope, cxAccountKey: () => session.account },
     localStorage: { getItem: k => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, v), removeItem: k => storage.delete(k) }
@@ -118,12 +119,64 @@ test('a result from a previous account is discarded before it changes the new ac
   const session = { scope: 'session-A', account: 'A' };
   let resolve;
   const response = new Promise(done => { resolve = done; });
-  const context = studyContext(new Map(), session, () => response);
-  const scan = vm.runInContext('scanStudyUpdates([{courseId:"1",classId:"2"}], "session-A")', context);
+  const context = studyContext(new Map(), session, async (_, options) => {
+    options.capture({ courseId: '1', classId: '2' }, await response);
+    return { at: 1, rest: {} };
+  });
+  const scan = vm.runInContext('queryStudy(null, true)', context);
   session.scope = 'session-B';
   session.account = 'B';
   vm.runInContext('reconcileStudyCache()', context);
   resolve(old);
-  assert.equal(await scan, 0);
+  await scan;
   assert.equal(vm.runInContext('Object.keys(studyCache.updates).length', context), 0);
+});
+
+const learningSource = fs.readFileSync(require.resolve('../web/learning.js'), 'utf8');
+
+function learningContext(response) {
+  const window = { Android: { cxSessionKey: () => 'session-A', cxPersist: () => '' } };
+  vm.runInNewContext(learningSource, { window, URL, setTimeout, nativeRequest: async () => response });
+  return window.Learning;
+}
+
+test('HTTP 200 login-expired JSON is distinguished from other service failures', async () => {
+  const response = { status: 200, body: '{"result":0,"status":false,"msg":"请重新登录"}' };
+  const learning = learningContext(response);
+  const options = { courses() {}, capture() {}, progress() {}, full: () => false, rest: {} };
+  await assert.rejects(learning.scan('session-A', options), { kind: 'auth' });
+  response.body = '{"result":0,"msg":"课程已归档"}';
+  await assert.rejects(learning.scan('session-A', options), { kind: 'parse' });
+});
+
+test('partial refresh keeps the previous exam and assignment data without marking unseen rows as new', () => {
+  const { mergeCourseResults, taskState, officialUrl } = learningContext();
+  const first = mergeCourseResults(null, [
+    { title: '作业', items: [{ id: 'w1', kind: 'work', state: 'done', status: '待批阅' }] },
+    { title: '考试', items: [{ id: 'e1', kind: 'exam', state: 'closed' }] }
+  ], 10).cache;
+  assert.equal(taskState(first.sections[0].items[0], 0), 'done');
+  assert.equal(taskState(first.sections[1].items[0], 0), 'closed');
+  const failed = mergeCourseResults(first, [{ title: '作业', complete: false, items: [] }], 20).cache;
+  assert.equal(failed.sections[0].items[0].id, 'w1');
+  assert.equal(failed.sections[1].items[0].id, 'e1');
+  const next = mergeCourseResults(first, [{ title: '作业', items: [
+    { id: 'w1', kind: 'work' }, { id: 'w2', kind: 'work' }
+  ] }], 30).cache;
+  assert.equal(next.sections[0].items[0].newAt, undefined);
+  assert.equal(next.sections[0].items[1].newAt, 30);
+  assert.equal(officialUrl('https://chaoxing.com.evil.invalid/task'), '');
+  assert.equal(officialUrl('https://mobilelearn.chaoxing.com/task'), 'https://mobilelearn.chaoxing.com/task');
+});
+
+test('auto scan uses the reference freshness window and class grouping preserves different teaching groups', () => {
+  const { autoScan, groupByCourse } = learningContext();
+  const visible = { linked: true, visible: true, lastAt: Date.now() - 31 * 60000, failedAt: 0 };
+  assert.equal(autoScan(visible), true);
+  assert.equal(autoScan({ ...visible, visible: false }), false);
+  assert.equal(autoScan({ ...visible, failedAt: Date.now() }), false);
+  assert.equal(groupByCourse([
+    { course: '同名课', courseId: '1', classId: '2' },
+    { course: '同名课', courseId: '1', classId: '3' }
+  ]).length, 2);
 });

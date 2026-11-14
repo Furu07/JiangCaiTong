@@ -21,6 +21,7 @@ final class CxNet {
         API_HOST, "mooc2-ans.chaoxing.com", "mobilelearn.chaoxing.com"
     };
     private static volatile Session session = new Session(newJar(), "");
+    private static volatile Session login;
 
     private static final class Session {
         final CookieManager jar;
@@ -59,6 +60,45 @@ final class CxNet {
     static CookieManager cookieJar(String expected) {
         Session current = session;
         return !expected.isEmpty() && current.key.equals(expected) && current.matchesIdentity() ? current.jar : null;
+    }
+
+    static synchronized String beginLogin() {
+        if (login != null) return "";
+        login = new Session(newJar(), UUID.randomUUID().toString());
+        return login.key;
+    }
+
+    static CookieManager loginJar(String ticket) {
+        Session candidate = login;
+        return candidate != null && candidate.key.equals(ticket) ? candidate.jar : null;
+    }
+
+    static synchronized String finishLogin(String ticket) {
+        Session candidate = login;
+        if (candidate == null || !candidate.key.equals(ticket)) return "登录请求已结束";
+        Session next = new Session(candidate.jar, candidate.key);
+        if (!next.matchesIdentity()) return "未取得有效会话，请使用学习通官方页面连接";
+        String failure = save(next);
+        if (failure.isEmpty()) session = next;
+        return failure;
+    }
+
+    static synchronized void cancelLogin(String ticket) {
+        if (login != null && login.key.equals(ticket)) login = null;
+    }
+
+    // Fixed client-protocol AES input used by the reference's fanyalogin form.
+    static String aesB64(String password) {
+        try {
+            byte[] key = "u2oh6Vu^HWe4_AES".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            javax.crypto.Cipher cipher = javax.crypto.Cipher.getInstance("AES/CBC/PKCS5Padding");
+            cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, new javax.crypto.spec.SecretKeySpec(key, "AES"),
+                    new javax.crypto.spec.IvParameterSpec(key));
+            return android.util.Base64.encodeToString(cipher.doFinal(
+                    password.getBytes(java.nio.charset.StandardCharsets.UTF_8)), android.util.Base64.NO_WRAP);
+        } catch (Exception ignored) {
+            return "";
+        }
     }
 
     static boolean isCurrent(CookieManager jar) {
@@ -114,6 +154,14 @@ final class CxNet {
         String failure = save(next);
         if (!failure.isEmpty()) throw new IllegalStateException(failure);
         session = next;
+        String saved = CredStore.loadCxCredentials();
+        try {
+            if (!saved.isEmpty() && !new JSONObject(saved).optString("account").equals(accountKey(next.key))) {
+                CredStore.saveCxCredentials("");
+            }
+        } catch (org.json.JSONException error) {
+            CredStore.saveCxCredentials("");
+        }
         return true;
     }
 
@@ -135,6 +183,25 @@ final class CxNet {
 
     static boolean hasLogin() {
         return !sessionKey().isEmpty();
+    }
+
+    static void loadTaskCookies(android.webkit.CookieManager webCookies, Runnable done) {
+        Session current = session;
+        if (!current.matchesIdentity()) { done.run(); return; }
+        java.util.List<HttpCookie> cookies = current.jar.getCookieStore().getCookies();
+        if (cookies.isEmpty()) { done.run(); return; }
+        java.util.concurrent.atomic.AtomicInteger pending = new java.util.concurrent.atomic.AtomicInteger(cookies.size());
+        Runnable complete = () -> {
+            if (pending.decrementAndGet() == 0) done.run();
+        };
+        for (HttpCookie cookie : cookies) {
+            String host = cookieHost(cookie);
+            if (!isHost(host) || cookie.hasExpired()) { complete.run(); continue; }
+            String path = cookie.getPath() == null ? "/" : cookie.getPath();
+            String header = cookie.getName() + "=" + cookie.getValue() + "; Path=" + path + "; Secure; HttpOnly";
+            if (cookie.getDomain().startsWith(".")) header += "; Domain=" + cookie.getDomain();
+            webCookies.setCookie("https://" + host + "/", header, ignored -> complete.run());
+        }
     }
 
     static synchronized String persist(String expected) {

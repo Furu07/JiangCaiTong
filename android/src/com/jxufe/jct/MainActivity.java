@@ -78,7 +78,7 @@ public class MainActivity extends Activity {
         settings.setAllowContentAccess(false);
         settings.setSaveFormData(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-        settings.setUserAgentString(settings.getUserAgentString() + " JiangCaiTong/0.8.9");
+        settings.setUserAgentString(settings.getUserAgentString() + " JiangCaiTong/0.9.1");
         if (android.os.Build.VERSION.SDK_INT >= 33) settings.setAlgorithmicDarkeningAllowed(false);
         bridge = new NativeBridge(web);
         web.addJavascriptInterface(bridge, "Android");

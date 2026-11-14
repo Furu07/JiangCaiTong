@@ -250,6 +250,25 @@ textarea { resize: vertical; }
 .setting-row .btn, .setting-row select { flex-shrink: 0; }
 .setting-row select { max-width: 50%; }
 .setting-row label { margin: 0; color: var(--text); font-size: 15px; }
+.account-entry {
+  display: flex; width: 100%; align-items: center; justify-content: space-between;
+  gap: 12px; min-height: 48px; padding: 0; border: 0; background: transparent;
+  color: var(--text); text-align: left; font: inherit;
+}
+.account-entry .sub { display: block; margin-top: 2px; }
+.account-description { min-width: 0; overflow-wrap: anywhere; }
+.account-description h2 { font-size: 15px; margin: 0; }
+.account-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; flex-shrink: 0; }
+.account-actions .btn { min-height: 44px; padding-inline: 10px; }
+.study-filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
+.study-filters label { flex: 1 1 86px; margin: 0; }
+.study-filters select { display: block; min-height: 44px; width: 100%; margin-top: 4px; }
+.study-order { align-self: flex-end; }
+.study-states { display: flex; gap: 4px; flex-wrap: wrap; flex: 1 0 100%; order: 1; }
+.study-states .btn { min-height: 44px; }
+.study-remember { display: flex; align-items: center; gap: 8px; }
+.study-remember input { width: auto; margin: 0; }
+.study-task[data-urgent="true"] .course-meta { color: var(--warn); }
 #academicImportPanel { margin-top: 8px; }
 #academicImportPanel summary { padding: 10px 0; min-height: 44px; }
 #academicImportPanel input, #academicImportPanel textarea { margin-bottom: 8px; }

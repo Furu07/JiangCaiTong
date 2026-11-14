@@ -289,43 +289,7 @@ function wtShowOn() {
 function wtPaintAccounts() {
   const dev = WT.accounts.device, sco = WT.accounts.score;
   if (typeof wtPaintOffNote === 'function') wtPaintOffNote();
-  const box = $('wtAccounts');
-  if (!box) return;
-  box.hidden = false;
-
-  const rows = [
-    { el: 'wtAccDevice', btn: 'wtAccDeviceBtn', sub: 'wtAccDeviceSub', a: dev,
-      need: '没登：接水、余额、设备都用不了' },
-    { el: 'wtAccScore', btn: 'wtAccScoreBtn', sub: 'wtAccScoreSub', a: sco,
-      need: '没登：任务少一半，也签不了到' },
-  ];
-  for (const r of rows) {
-    const a = r.a;
-    const b = $(r.btn);
-    b.disabled = !a && !Water.configured();
-    if (a) {
-      $(r.sub).textContent = wtMaskPhone(a.phone || '') + ' · 已登录';
-      $(r.sub).classList.remove('need');
-      b.textContent = '退出';
-      b.dataset.act = 'out';
-    } else {
-      $(r.sub).textContent = r.need;
-      $(r.sub).classList.add('need');
-      b.textContent = '登录';
-      b.dataset.act = 'in';
-    }
-  }
-  // 两个都登了就别再啰嗦
-  const tip = $('wtAccTip');
-  if (dev && sco) {
-    tip.hidden = true;
-  } else {
-    tip.hidden = false;
-    tip.classList.remove('err');
-    tip.textContent = dev || sco
-      ? '两个账号各管一半功能，另一个登了才完整。同一个手机号就行。'
-      : '两个都登，同一手机号：一个接水，一个积分。';
-  }
+  window.renderServiceAccounts?.();
 }
 
 /** 138****5678。太短的不打码（打完全看不出是什么了）。 */
@@ -342,7 +306,15 @@ function wtMaskPhone(p) {
  *     一次」再拼进来 —— 拼出来是「…要重新登录一次。重新登录一次就行…」，
  *     同一句话说两遍。而且余额和设备那两处也不再加红字，否则同屏三遍。
  *     固定的文案写在 index.html 的 `.sub` 里，这里只管显示。 */
+const expiredAccounts = new Set();
+const verifiedAccounts = new Set();
+
 function wtExpire(kind) {
+  if (kind) {
+    expiredAccounts.add(kind);
+    verifiedAccounts.delete(kind);
+  }
+  window.renderServiceAccounts?.();
   WT.expired = true;
   // 🔴 必须点名是哪个账号。两个账号各管一半：只写「登录过期了」，
   //    用户重登了另一个回来还是这一句 —— 2026-11-08 就是这么转圈的。
@@ -1114,6 +1086,11 @@ async function wtLoad() {
       return;
     }
     WT.expired = false;      // 读到了 ⇒ 票是好的，把过期标记清掉
+    if (!r.balanceError || !r.devicesError) {
+      expiredAccounts.delete('device');
+      verifiedAccounts.add('device');
+      window.renderServiceAccounts?.();
+    }
     WT.bal = (typeof r.balance === 'number' && isFinite(r.balance)) ? r.balance : null;
     WT.balErr = r.balanceError || '';
     WT.devs = Array.isArray(r.devices) ? r.devices : [];
@@ -1411,11 +1388,16 @@ async function wtLoadScore() {
   try {
     const r = await api('/api/water/score');
     if (!r || !r.ok) {
-      if (r && r.kind === 'auth') { wtExpire('score'); }
+      if (r && r.kind === 'auth') { wtExpire(WT.accounts.score ? 'score' : 'device'); }
 
       WT.score = null;
       WT.scoreErr = (r && r.error) || '读不到';
     } else {
+      if (WT.accounts.score) {
+        expiredAccounts.delete('score');
+        verifiedAccounts.add('score');
+        window.renderServiceAccounts?.();
+      }
       WT.score = {
         valid: (typeof r.valid === 'number' && isFinite(r.valid)) ? r.valid : null,
         total: (typeof r.total === 'number' && isFinite(r.total)) ? r.total : null,
@@ -1779,7 +1761,7 @@ async function wtLoadMissions(keepRun) {
   try {
     const r = await api('/api/water/missions');
     if (!r || !r.ok) {
-      if (r && r.kind === 'auth') { wtExpire('score'); }
+      if (r && r.kind === 'auth') { wtExpire(WT.accounts.score ? 'score' : 'device'); }
       // 「积分任务一直失败」是 2026-11-06 那轮的主要问题。报上去才知道
       // 是所有人都失败（平台改版），还是只有某类账号失败。
 
@@ -2612,22 +2594,16 @@ async function wtSendSms() {
 
 /** 用短信验证码换 token。🔴 失败**绝不自动重试**（红线）：错一次就换图。 */
 /** 点了某一行的按钮：已登录就退出，没登录就展开表单登这个。 */
-async function wtAccTap(kind) {
-  if (WT.busy || WT.running || wtStopping || WT.ex.busy || loading) return;
-  const a = WT.accounts[kind];
-  if (a) { await wtLogout(kind); return; }
-  wtOpenLogin(kind);
-}
-
-/** 把登录表展开在**当前这一页**（不跳去「我的」）。
- *  「过期了，重登一次」和「第一次用，去登录」要落在同一个动作上 ——
- *  两处各写一份的话，总有一处会忘了带手机号或忘了换图。 */
 function wtOpenLogin(kind) {
+  if (WT.busy || WT.running || wtStopping || WT.ex.busy || loading) return;
   if (!Water.configured()) { toast('当前构建缺少航院通 0.52.0 参考配置'); return; }
-  WT.loginKind = (kind === 'score') ? 'score' : 'device';
+  const selected = kind === 'score' ? 'score' : 'device';
+  if (WT.loginKind === selected && !$('waterOff').hidden) return;
+  WT.loginKind = selected;
+  $('wtPhone').value = Water.state().accounts[selected]?.phone || '';
+  $('wtSms').value = '';
   WT.key = '';                 // 换账号就换一张图，别用上一张的 key
   // 过期卡收起来：表单已经出来了，再摆一张「过期了」只会挤占屏幕
-  WT.expired = false;
   $('wtExpired').hidden = true;
   if (typeof wtPaintAccounts === 'function') wtPaintAccounts();
   // 🔴 表单在「账号管理」页上，人却在「功能」页（过期卡就在那儿）。
@@ -2636,11 +2612,6 @@ function wtOpenLogin(kind) {
   //    登完送回去（见 wtLogin），别让人自己再找一遍。
   const box = $('waterOff');
   box.hidden = false;
-  // 号码带出来：退出登录之后它还在（见 KEY.wtPhone），别让人再背一遍
-  const phEl = $('wtPhone');
-  if (phEl && !phEl.value.trim()) {
-    phEl.value = WT.phone || '';
-  }
   $('wtLoginTitle').textContent = WT.loginKind === 'device' ? '登录设备账号' : '登录积分账号';
   // 一行说清「这个账号是干什么的」。原来这里还解释了一遍「用短信验证码、
   // 密码不用填」—— 表单上就三行、没有密码框，看得见，不用再说。
@@ -2657,6 +2628,7 @@ function wtCancelLogin() {
   WT.key = '';
   WT.loginBack = '';       // 取消了就别再「登完送回去」
   $('waterOff').hidden = true;
+  $('wtPhone').value = '';
   $('wtSms').value = '';
   $('wtGraph').value = '';
   wtTip('', false);
@@ -2709,12 +2681,15 @@ async function wtLogin() {
     //    不然还需要退出APP清后台再进来才能刷新状态」。
     //    送回去用 switchTab（它自己会调 renderWater），不自己改 hidden：
     //    改 hidden 不同步 CUR_PAGE / 底部高亮，返回键就指错地方了。
-    await renderWater();
+    expiredAccounts.delete(kind);
+    verifiedAccounts.add(kind);
+    wtCancelLogin();
   } catch (e) {
     wtTip('登录失败：' + e.message, true);
   } finally {
     WT.busy = false;
     $('wtLogin').disabled = false;
+    window.renderServiceAccounts?.();
   }
 }
 
@@ -2780,9 +2755,17 @@ async function wtLogout(kind) {
       : '只清这台手机上的登录，另一个账号不受影响。',
     '退出');
   if (!ok) return;
+  WT.busy = true;
   try {
-    await api('/api/water/logout', one ? { kind: one } : {});
-  } catch (e) { /* 清不掉也要把界面切回去，别卡在「已登录」 */ }
+    const result = await api('/api/water/logout', one ? { kind: one } : {});
+    if (!result.ok) { toast(result.error || '退出失败'); return; }
+    expiredAccounts.delete(one);
+    verifiedAccounts.delete(one);
+    wtCancelLogin();
+    window.renderServiceAccounts?.();
+  } finally {
+    WT.busy = false;
+  }
   WT.key = '';
   WT.loginKind = '';
   if (one) {
@@ -2810,7 +2793,7 @@ async function wtLogout(kind) {
     $('wtPhone').value = WT.phone || '';
     $('wtSms').value = '';
     $('wtGraph').value = '';
-    await renderWater();
+    window.renderServiceAccounts?.();
     return;
   }
   WT.bal = null; WT.balErr = ''; WT.devs = []; WT.devErr = '';
@@ -2846,7 +2829,7 @@ $('wtGoLogin').addEventListener('click', () => {
   // 记住从哪来：登完要送回这一页（见 wtLogin）。这里必须**先记再切** ——
   // 切过去之后 CUR_PAGE 就是 'accounts' 了，那时再问「从哪来」只会得到
   // 「账号管理」，人就永远回不去功能页。
-  if (!WT.accounts.device) wtOpenLogin('device');
+  window.openServiceAccounts?.();
 });
 $('wtCapNew').addEventListener('click', () => { wtNewCaptcha(); });
 // 点图也能换一张。图和「看不清？换一张」是同一个动作 —— 用户看图第一反应
@@ -2862,8 +2845,6 @@ $('wtCapImg').addEventListener('error', () => {
 $('wtSend').addEventListener('click', () => { wtSendSms(); });
 $('wtLogin').addEventListener('click', () => { wtLogin(); });
 // 两行账号：点「登录」展开表单，点「退出」只退那一格。
-$('wtAccDeviceBtn').addEventListener('click', () => { wtAccTap('device'); });
-$('wtAccScoreBtn').addEventListener('click', () => { wtAccTap('score'); });
 $('wtLoginCancel').addEventListener('click', () => { wtCancelLogin(); });
 // 刷新 = 刷新**这一页**（余额设备 + 积分 + 任务 + 账单），不是只刷余额。
 // 只刷一半的话，用户看到「余额变了、积分还是刚才那个数」，会以为积分不更新。
@@ -2872,7 +2853,7 @@ $('wtOpenApp').addEventListener('click', () => { openWater(); });
 // 0.39.1：「退出登录」整行删了，改由「账号管理」里设备/积分各自的「退出」承担
 // （`wtAccTap` → `wtLogout(kind)`）。这一页只留常用动作。
 // 「重新登录」不跳别处，就在本页把表单换出来 —— 手机号还在，只要再收条短信。
-$('wtRelogin').addEventListener('click', () => { wtOpenLogin(WT.expiredKind || 'device'); });
+$('wtRelogin').addEventListener('click', () => { window.openServiceAccounts?.(); });
 // 0.24.0：一键完成任务 / 加载更多账单 / 停止接水（2026-11-10 起「停止」
 // 不再是一颗固定按钮 —— 它就是设备行上那颗「接水」变成的，见 wtPaintDevs）
 $('wtRunAll').addEventListener('click', () => { wtRunAll(); });
@@ -3031,5 +3012,15 @@ document.addEventListener('visibilitychange', () => {
     wtLiveStartPoll();
   }
 });
-window.WaterPage = Object.freeze({ update, close });
+window.WaterPage = Object.freeze({
+  update, close, expired: kind => expiredAccounts.has(kind),
+  verified: kind => verifiedAccounts.has(kind),
+  busy: () => WT.busy || WT.running || wtStopping || WT.ex.busy || !!loading,
+  login: wtOpenLogin, cancelLogin: wtCancelLogin,
+  logout(kind) {
+    if (this.busy()) return;
+    if (kind === 'device' && WT.live) { toast('请先在饮水页确认本次用水已结束'); return; }
+    return wtLogout(kind);
+  }
+});
 })();

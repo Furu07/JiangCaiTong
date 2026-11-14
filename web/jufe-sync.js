@@ -145,7 +145,15 @@
       }
     }
 
-    return { bind, restore, snapshot, refresh, resume, needsRefresh, protectAccount, requireReauthorization };
+    function disconnect() {
+      if (inflight) throw new Error('请等待当前教务查询结束');
+      storage.removeItem(storageKey);
+      binding = null;
+      adapter.signOut();
+      lastAttempt = -Infinity;
+    }
+
+    return { bind, restore, snapshot, refresh, resume, needsRefresh, protectAccount, requireReauthorization, disconnect };
   }
 
   window.JufeSync = { create };

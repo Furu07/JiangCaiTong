@@ -20,16 +20,19 @@ public class WebActivity extends Activity {
             + "https%3A%2F%2Fmooc2-ans.chaoxing.com%2Fmooc2-ans%2Fvisit%2Finteraction";
     private WebView web;
     private Button done;
+    private boolean taskPage;
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
+        String task = getIntent().getStringExtra("studyTask");
+        taskPage = task != null && NativeBridge.isChaoxing(Uri.parse(task));
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
         done = new Button(this);
-        done.setText("完成登录并返回");
-        done.setOnClickListener(view -> useSession());
+        done.setText(taskPage ? "返回酱菜通" : "完成登录并返回");
+        done.setOnClickListener(view -> { if (taskPage) closeTask(); else useSession(); });
         layout.addView(done);
 
         web = new WebView(this);
@@ -46,8 +49,17 @@ public class WebActivity extends Activity {
         if (state == null || web.restoreState(state) == null) {
             done.setEnabled(false);
             resetBrowserCookies(() -> {
-                done.setEnabled(true);
-                web.loadUrl(LOGIN);
+                if (taskPage) {
+                    CxNet.loadTaskCookies(CookieManager.getInstance(), () -> {
+                        if (!isFinishing() && !isDestroyed()) {
+                            done.setEnabled(true);
+                            web.loadUrl(task);
+                        }
+                    });
+                } else {
+                    done.setEnabled(true);
+                    web.loadUrl(LOGIN);
+                }
             });
         }
     }
@@ -94,7 +106,14 @@ public class WebActivity extends Activity {
     @Override
     public void onBackPressed() {
         if (web.canGoBack()) web.goBack();
+        else if (taskPage) closeTask();
         else super.onBackPressed();
+    }
+
+    private void closeTask() {
+        done.setEnabled(false);
+        web.stopLoading();
+        resetBrowserCookies(this::finish);
     }
 
     @Override

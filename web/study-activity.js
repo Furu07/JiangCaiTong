@@ -93,13 +93,22 @@
       hiddenAt: state.manualHidden || autoHidden ? state.hiddenAt || now : 0 };
   }
 
-  function dueCourses(courses, updates, keyOf, now, force = false) {
-    const checked = course => read(updates[keyOf(course)]).checkedAt || 0;
-    return courses.filter(course => {
-      const at = checked(course);
-      return force || !at || now < at || now - at >= checkInterval;
-    }).sort((a, b) => checked(a) - checked(b));
+  function needsFullCheck(record, now) {
+    const checked = read(record).checkedAt || 0;
+    return !checked || now < checked || now - checked >= checkInterval;
   }
 
-  window.StudyActivity = { hiddenReason, setVisibility, update, dueCourses };
+  function observeActivities(record, section, deviceNow) {
+    const state = read(record);
+    if (!section || section.error || (state.serverClock && !section.serverTime)) return state;
+    const now = section.serverTime || deviceNow;
+    if (now < (state.evidenceAt || 0)) return state;
+    const notice = observeSource(state.notices, section, 'notice', now);
+    if (!notice.updated) return { ...state, notices: notice.state };
+    const revived = now - notice.state.latest <= inactiveAfter;
+    return { ...state, notices: notice.state, lastActivityAt: Math.max(state.lastActivityAt || 0, notice.state.latest),
+      autoHidden: !revived && state.autoHidden, hiddenAt: revived && !state.manualHidden ? 0 : state.hiddenAt };
+  }
+
+  window.StudyActivity = { hiddenReason, setVisibility, update, needsFullCheck, observeActivities };
 })();

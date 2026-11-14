@@ -17,6 +17,7 @@ import javax.crypto.spec.GCMParameterSpec;
 final class CredStore {
     private static final String PREFS = "jiangcaitong";
     private static final String FIELD_CX = "cx.cookies";
+    private static final String FIELD_CX_PASSWORD = "cx.password";
     private static final String FIELD_WATER = "water.state";
     private static final String KEY_ALIAS = "jiangcaitong.cred.v1";
     private static final String TRANSFORM = "AES/GCM/NoPadding";
@@ -27,6 +28,12 @@ final class CredStore {
     static String saveCx(String json) { return savePlain(FIELD_CX, json); }
     static String loadCx() { return loadPlain(FIELD_CX); }
     static void clearCx() { clearField(FIELD_CX); }
+    static String loadCxCredentials() { return loadPlain(FIELD_CX_PASSWORD); }
+    static String saveCxCredentials(String json) {
+        if (!json.isEmpty()) return savePlain(FIELD_CX_PASSWORD, json);
+        clearField(FIELD_CX_PASSWORD);
+        return "";
+    }
     static String saveWater(String json) { return savePlain(FIELD_WATER, json); }
     static String loadWater() { return loadPlain(FIELD_WATER); }
     static void clearWater() { clearField(FIELD_WATER); }

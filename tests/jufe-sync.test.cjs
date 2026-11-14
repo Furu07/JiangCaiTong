@@ -12,7 +12,8 @@ for (const file of ['academic.js', 'jufe-academic.js', 'jufe-sync.js']) {
 const { JufeAcademicAdapter, JufeSync } = context;
 const term = { termId: 'fixture', term: '测试学期', firstMonday: '2026-09-07', totalWeeks: 19, current: true };
 const values = new Map();
-const storage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
+const storage = { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value),
+  removeItem: key => values.delete(key) };
 let online = true;
 let now = 0;
 let reads = 0;
@@ -93,6 +94,10 @@ async function main() {
   expired = false;
   assert.equal((await controller.bind(a)).status, 'fresh');
   assert.equal(controller.snapshot().state, 'authorized');
+  controller.disconnect();
+  assert.equal(controller.snapshot().state, 'unbound');
+  assert.equal(reopen().snapshot().accountKey, '');
+  assert(values.has('jct.academic.v2.' + JSON.stringify(['jufe', a.accountKey, term.termId])));
   console.log('PASS JUFE refresh, offline fallback, isolation, and expired-session gate');
 }
 

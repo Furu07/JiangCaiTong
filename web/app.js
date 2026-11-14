@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '0.8.9';
+const APP_VERSION = '0.9.1';
 const $ = id => document.getElementById(id);
 const tabs = Array.from(document.querySelectorAll('[data-tab]'));
 const native = window.Android;
@@ -23,12 +23,20 @@ function time(at) {
   return new Date(at).toLocaleString('zh-CN', { hour12: false });
 }
 
+let accountsReturn = 'me';
+
 function select(tab) {
+  const onAccounts = tab === 'accounts';
+  if (!onAccounts && !$('page-accounts').hidden) {
+    WaterPage.cancelLogin();
+    closeStudyCredentials();
+  }
+  $('page-accounts').hidden = !onAccounts;
   tabs.forEach(button => {
     const active = button.dataset.tab === tab;
     $('page-' + button.dataset.tab).hidden = !active;
-    button.classList.toggle('active', active);
-    if (active) button.setAttribute('aria-current', 'page');
+    button.classList.toggle('active', active || (onAccounts && button.dataset.tab === 'me'));
+    if (active || (onAccounts && button.dataset.tab === 'me')) button.setAttribute('aria-current', 'page');
     else button.removeAttribute('aria-current');
   });
   refreshSession();
@@ -66,7 +74,8 @@ function closeCourseDetails() {
   if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
   return true;
 }
-window.closeDetails = () => WaterPage.close() || window.closeTodoEditor?.() || closeCourseDetails();
+window.closeDetails = () => closeStudyCredentials() || WaterPage.close() || window.closeTodoEditor?.() || closeCourseDetails()
+  || (!$('page-accounts').hidden && (select(accountsReturn), true));
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && window.closeDetails()) event.preventDefault();
 });
@@ -220,7 +229,7 @@ async function syncSchedule() {
 
 const studyKeyPrefix = 'jct.study.v3.';
 const oldStudyKey = 'jct.study.v2';
-const activeStudyScope = () => native ? native.cxSessionKey() : '';
+const activeStudyScope = Learning.restore;
 const emptyStudyCache = (scope, account = '') => ({ scope, account, courses: [], details: {}, updates: {}, at: 0 });
 
 function readStudyCache(scope) {
@@ -249,14 +258,18 @@ let selectedCourse = '';
 let studyAttempt = null;
 let studyBusy = false;
 let studyMessage = '';
+const studyConnectionKey = 'jct.study.connection';
+function studyConnection(value) {
+  try {
+    if (value) localStorage.setItem(studyConnectionKey, value);
+    return localStorage.getItem(studyConnectionKey) || '';
+  } catch (_) { return ''; }
+}
 let showInactiveStudyCourses = false;
 let studyListState = [];
 const studyOpenSections = new Map();
 let studyForeground = true;
-let studyScanTimer;
-let studyRetryAt = 0;
-let studyManualQueue = new Set();
-const studyCheckLimit = 6;
+let studyAutoFailedAt = 0;
 
 function courseKey(course) {
   return String(course.courseId) + ':' + String(course.classId);
@@ -265,14 +278,16 @@ function courseKey(course) {
 function reconcileStudyCache() {
   const scope = activeStudyScope();
   if (studyCache.scope !== scope) {
+    if (scope) studyConnection('saved');
+    else if (studyCache.scope && studyConnection() !== 'disconnected') studyConnection('expired');
     studyCache = readStudyCache(scope);
     selectedCourse = '';
     studyAttempt = null;
     showInactiveStudyCourses = false;
     studyOpenSections.clear();
-    studyManualQueue.clear();
-    studyRetryAt = 0;
-    studyMessage = scope ? '已接收学习通会话，请查询课程确认授权。' : '';
+    studyAutoFailedAt = 0;
+    studyMessage = scope ? '已接收学习通会话，请查询课程确认授权。'
+      : studyConnection() === 'expired' ? '学习通会话已过期，请重新连接。' : '';
   }
   return scope;
 }
@@ -293,8 +308,7 @@ function clearStudyCache(remove = false) {
   studyAttempt = null;
   showInactiveStudyCourses = false;
   studyOpenSections.clear();
-  studyManualQueue.clear();
-  studyRetryAt = 0;
+  studyAutoFailedAt = 0;
   if (!remove || !account) return;
   try {
     localStorage.removeItem(studyKeyPrefix + account);
@@ -349,7 +363,14 @@ function showCourseResults(course) {
       const signed = item.kind === 'sign' && !item.status
         ? item.signed === true ? '已签' : item.signed === false ? '未签' : '签到状态未知' : '';
       const status = [item.kindName, item.status || signed, studyDeadline(item)].filter(Boolean).join(' · ');
-      group.appendChild(resultRow(item.title, status));
+      if (item.url) {
+        const button = node('button', null, 'study-task');
+        button.type = 'button';
+        button.append(node('span', item.title, 'task-name'),
+          node('span', [status, '打开学习通'].filter(Boolean).join(' · '), 'course-meta'));
+        button.addEventListener('click', () => native?.openStudyTask?.(item.url));
+        group.appendChild(button);
+      } else group.appendChild(resultRow(item.title, status));
     });
     card.appendChild(group);
   });
@@ -370,15 +391,34 @@ function resultRow(title, subtitle) {
   return row;
 }
 
+const studyKinds = { work: '作业', exam: '考试', quiz: '随堂练习', sign: '签到与签退',
+  topic: '主题讨论', notice: '通知', other: '其他活动' };
+const studyFilter = { kind: 'all', state: 'todo', order: 'urgent' };
+
 function studyDeadline(item) {
   if (item.kind === 'notice') return '';
-  if (item.left) return item.left;
-  return item.kind === 'work' && Number.isFinite(item.endAt) && item.endAt > 0 ? '截止 ' + time(item.endAt * 1000) : '';
+  if (item.deadlineEstimated) return item.left || '';
+  if (Number.isFinite(item.endAt) && item.endAt > 0) return '截止 ' + time(item.endAt * 1000);
+  return item.left && !/剩余|开始|发布时间|发布于/.test(item.left) ? item.left : '';
+}
+
+function studyTaskTiming(item, state) {
+  const due = studyDeadline(item);
+  if (state !== 'todo' || item.kind === 'notice' || item.deadlineEstimated) return due;
+  const minutes = Learning.minLeft(item);
+  if (minutes == null || minutes < 0 || (item.kind === 'sign' && !item.endAt)) return due;
+  return [Learning.leftLabel(minutes), due].filter(Boolean).join(' · ');
 }
 
 function pendingHomework(entry) {
+  const now = Date.now() / 1000;
   return entry?.sections?.find(section => section.title === '作业')?.items
-    ?.filter(item => item.kind === 'work' && item.state === 'todo');
+    ?.filter(item => item.kind === 'work' && Learning.taskState(item, now) === 'todo');
+}
+
+function openStudyTask(item, course) {
+  if (item.url && native?.openStudyTask?.(item.url)) return;
+  openStudyCourse(course);
 }
 
 function openStudyCourse(course) {
@@ -398,40 +438,77 @@ function sectionHeading(title, detail) {
   return heading;
 }
 
-function renderStudyTasks(courses) {
+function cxItemHtml(item, showCourse, now) {
+  const course = item.courseRecord;
+  const state = item.taskState;
+  const button = node('button', null, 'study-task');
+  button.type = 'button';
+  const isNew = item.newAt > 0 && now >= item.newAt && now - item.newAt < 24 * 3600000;
+  const label = item.title.includes(studyKinds[item.kind]) ? '' : studyKinds[item.kind];
+  const status = state === 'closed' ? '已截止' : state === 'done' ? item.status || '已完成'
+    : state === 'todo' ? item.status || '未完成' : item.status;
+  const minutes = state === 'todo' && item.kind !== 'notice' ? Learning.minLeft(item) : null;
+  button.append(node('span', item.title, 'task-name'),
+    node('span', [showCourse ? course.title : '', label, status, studyTaskTiming(item, state),
+      isNew ? '新发现' : '', item.url ? '打开学习通' : ''].filter(Boolean).join(' · '), 'course-meta'));
+  if (minutes != null && minutes >= 0 && minutes <= 1440) button.dataset.urgent = 'true';
+  button.addEventListener('click', () => openStudyTask(item, course));
+  return button;
+}
+
+function cxPaintTodo(courses) {
   const target = $('studyTasks');
+  const now = Date.now();
   const tasks = [];
   let loaded = 0;
   for (const course of courses) {
-    const work = pendingHomework(studyCache.details[courseKey(course)]);
-    if (!work) continue;
+    const sections = studyCache.details[courseKey(course)]?.sections || [];
+    if (!sections.some(section => Array.isArray(section.items))) continue;
     loaded++;
-    work.forEach(item => tasks.push({ course, item }));
+    const seen = new Set();
+    const work = sections.find(section => section.title === '作业')?.items || [];
+    for (const section of sections) {
+      for (const item of section.items || []) {
+        if (section.title === '活动' && item.kind === 'work'
+            && work.some(row => (row.id && row.id === item.id) || row.title === item.title)) continue;
+        const key = item.id && item.kind + ':' + item.id;
+        if (key && seen.has(key)) continue;
+        if (key) seen.add(key);
+        tasks.push({ course, item, state: Learning.taskState(item, now / 1000) });
+      }
+    }
   }
-  if (!loaded) {
-    target.replaceChildren();
-    return;
-  }
+  $('studyFilters').hidden = !loaded;
+  if (!loaded) { target.replaceChildren(); return; }
   const section = node('section');
-  section.appendChild(sectionHeading('待处理作业', '已读取 ' + loaded + ' 门课程'));
+  const selected = tasks.filter(task => (studyFilter.kind === 'all' || task.item.kind === studyFilter.kind)
+    && (studyFilter.state === 'todo' ? Learning.visibleTodo(task.item, now / 1000)
+      : studyFilter.state === 'all' || task.state === studyFilter.state));
+  const fresh = tasks.filter(({ item }) => item.newAt > 0 && now >= item.newAt && now - item.newAt < 24 * 3600000);
+  section.appendChild(sectionHeading('学习任务', selected.length + ' 项 · 已读 ' + loaded + ' 门课程'
+    + (fresh.length ? ' · ' + fresh.length + ' 项新发现' : '')));
+  const items = selected.map(task => ({ ...task.item, courseId: task.course.courseId,
+    classId: task.course.classId, course: task.course.title, courseRecord: task.course, taskState: task.state }));
+  const ordered = Learning.sortItems(items);
   const list = node('div', null, 'card task-list');
-  tasks.sort((a, b) => (a.item.endAt || Infinity) - (b.item.endAt || Infinity));
-  if (!tasks.length) list.appendChild(node('p', '已读取的课程暂无待处理作业。', 'empty-state'));
-  function taskButton({ course, item }) {
-    const button = node('button', null, 'study-task');
-    button.type = 'button';
-    button.append(node('span', item.title, 'task-name'),
-      node('span', [course.title || '未命名课程', item.status, studyDeadline(item)].filter(Boolean).join(' · '), 'course-meta'));
-    button.addEventListener('click', () => openStudyCourse(course));
-    return button;
-  }
-  tasks.slice(0, 4).forEach(task => list.appendChild(taskButton(task)));
-  if (tasks.length > 4) {
-    const more = node('details', null, 'result-group study-hidden');
-    more.open = target.querySelector('details')?.open || false;
-    more.appendChild(node('summary', '其余 ' + (tasks.length - 4) + ' 项'));
-    tasks.slice(4).forEach(task => more.appendChild(taskButton(task)));
-    list.appendChild(more);
+  if (!selected.length) list.appendChild(node('p', '当前筛选下没有任务。', 'empty-state'));
+  if (studyFilter.order === 'course') {
+    for (const group of Learning.groupByCourse(ordered)) {
+      const fold = node('details', null, 'result-group');
+      fold.open = true;
+      fold.append(node('summary', group.course + ' · ' + group.items.length + ' 项'),
+        ...group.items.map(task => cxItemHtml(task, false, now)));
+      list.appendChild(fold);
+    }
+  } else {
+    ordered.slice(0, 6).forEach(task => list.appendChild(cxItemHtml(task, true, now)));
+    if (ordered.length > 6) {
+      const more = node('details', null, 'result-group study-hidden');
+      more.open = target.querySelector('details')?.open || false;
+      more.appendChild(node('summary', '其余 ' + (ordered.length - 6) + ' 项'));
+      ordered.slice(6).forEach(task => more.appendChild(cxItemHtml(task, true, now)));
+      list.appendChild(more);
+    }
   }
   section.appendChild(list);
   target.replaceChildren(section);
@@ -440,6 +517,7 @@ function renderStudyTasks(courses) {
 function renderStudy() {
   const linked = !!reconcileStudyCache();
   $('studyLogin').hidden = linked;
+  $('studyLogin').textContent = studyConnection() === 'expired' ? '重新连接学习通' : '管理学习通账号';
   $('studyLogin').disabled = !native || studyBusy;
   $('studyRefresh').disabled = !linked || studyBusy;
   $('studyRefresh').textContent = studyBusy ? '刷新中…' : '刷新课程';
@@ -461,7 +539,7 @@ function renderStudy() {
   const focusKey = document.activeElement?.dataset.studyCourse;
   const content = document.createDocumentFragment();
   const active = studyCache.courses.filter(course => !StudyActivity.hiddenReason(studyCache.updates[courseKey(course)]));
-  renderStudyTasks(active);
+  cxPaintTodo(active);
   if (studyCache.at) {
     const card = node('section', null, 'card study-course-list');
     const hiddenCount = studyCache.courses.length - active.length;
@@ -530,6 +608,15 @@ function renderStudy() {
 
 function openStudyLogin() {
   if (!native || studyBusy) return;
+  $('studyCredentials').hidden = false;
+  $('studyCredentialError').textContent = '';
+  $('studySavedLogin').hidden = !native.cxHasSavedLogin();
+  $('studyCredentials').scrollIntoView({ block: 'nearest' });
+  $('studyUsername').focus();
+}
+
+function openOfficialStudyLogin() {
+  if (!native || studyBusy) return;
   try {
     if (!native.openStudyLogin()) {
       studyMessage = '登录窗口暂不可用，请稍后再试';
@@ -539,141 +626,250 @@ function openStudyLogin() {
   } catch (error) {
     studyMessage = '无法打开学习通登录页 · ' + error.message;
   }
+  if (!$('page-accounts').hidden) setAccountMessage(studyMessage);
   renderStudy();
 }
 
-function studyUpdateBatch() {
-  const due = studyManualQueue.size
-    ? studyCache.courses.filter(course => studyManualQueue.has(courseKey(course)))
-    : StudyActivity.dueCourses(studyCache.courses, studyCache.updates, courseKey, Date.now());
-  const hidden = due.filter(course => StudyActivity.hiddenReason(studyCache.updates[courseKey(course)]))
-    .slice(0, studyCheckLimit / 2);
-  return hidden.concat(due.filter(course => !hidden.includes(course))).slice(0, studyCheckLimit);
+function scheduleStudyUpdates() {
+  const scope = reconcileStudyCache();
+  if (!studyBusy && navigator.onLine && Learning.autoScan({
+    linked: !!scope, visible: studyForeground && !document.hidden && !$('page-study').hidden,
+    lastAt: studyCache.scanAt ?? studyCache.at, failedAt: studyAutoFailedAt
+  })) queryStudy(null, true);
 }
 
-function scheduleStudyUpdates(delay = 0) {
-  clearTimeout(studyScanTimer);
-  if (!native || !studyForeground || document.hidden || !navigator.onLine || studyBusy
-      || !reconcileStudyCache() || !studyUpdateBatch().length) return;
-  studyScanTimer = setTimeout(() => queryStudy(null, true), Math.max(delay, studyRetryAt - Date.now()));
-}
-
-window.pauseStudyUpdates = () => {
-  studyForeground = false;
-  clearTimeout(studyScanTimer);
-};
+window.pauseStudyUpdates = () => { studyForeground = false; };
 window.resumeStudyUpdates = () => {
   studyForeground = true;
-  scheduleStudyUpdates(1500);
+  scheduleStudyUpdates();
 };
-document.addEventListener('visibilitychange', () => scheduleStudyUpdates(1500));
-window.addEventListener('online', () => scheduleStudyUpdates(1500));
+document.addEventListener('visibilitychange', scheduleStudyUpdates);
+window.addEventListener('online', scheduleStudyUpdates);
 
-async function scanStudyUpdates(batch, scope) {
-  let checked = 0;
-  for (const course of batch) {
-    if (activeStudyScope() !== scope || !studyForeground || document.hidden) break;
-    const sections = await Learning.readCourse(course, scope, true);
-    if (activeStudyScope() !== scope) break;
-    const key = courseKey(course);
-    studyCache.updates[key] = StudyActivity.update(studyCache.updates[key], sections, Date.now());
-    studyManualQueue.delete(key);
-    if (sections.every(section => !section.error && section.complete)) checked++;
-    if (sections.every(section => section.error) && sections.some(section => section.kind === 'net')) {
-      studyRetryAt = Date.now() + 15 * 60 * 1000;
-      break;
-    }
-  }
-  return checked;
-}
-
-async function queryStudy(course, checkOnly = false) {
+async function queryStudy(course, automatic = false) {
   if (!native || studyBusy) return;
   const scope = reconcileStudyCache();
   if (!scope) return;
-  const batch = checkOnly ? studyUpdateBatch() : null;
-  if (batch && (!batch.length || !navigator.onLine || !studyForeground || document.hidden)) return;
-  clearTimeout(studyScanTimer);
   if (course) selectedCourse = courseKey(course);
   studyBusy = true;
-  studyMessage = course ? '正在读取作业、考试与活动…' : checkOnly ? '正在检查课程更新…' : '正在读取课程…';
+  studyMessage = '正在读取学习通…';
   refreshSession();
+  const timetable = schoolSync.snapshot();
+  const term = timetable.terms.find(item => item.current && item.termId === timetable.selected);
+  const names = !course && term ? timetable.entry?.schedule?.courses?.map(item => ({ name: item.name, teacher: item.teacher })) : null;
+  let checked = 0;
+  let failed = 0;
+  let processed = 0;
+  let hasUsefulData = false;
+  const sectionsRead = { 作业: 0, 考试: 0, 活动: 0 };
+  const scanChanges = new Map();
   try {
-    if (course) {
-      const sections = await Learning.readCourse(course, scope);
-      if (activeStudyScope() !== scope) return;
-      const key = courseKey(course);
-      const previous = studyCache.details[key];
-      const merged = Learning.mergeCourseResults(previous, sections, Date.now());
-      studyCache.updates[key] = StudyActivity.update(studyCache.updates[key], sections, Date.now());
-      studyManualQueue.delete(key);
-      studyAttempt = { key, sections: merged.sections };
-      if (merged.cache && merged.cache !== previous) studyCache.details[key] = merged.cache;
-      studyMessage = sections.every(section => section.error) ? '任务刷新失败，请查看各类别的状态。'
-        : sections.some(section => section.error) ? '部分学习任务未更新，请查看各类别的状态。' : '学习任务读取完成。';
-    } else if (!checkOnly) {
-      const courses = await Learning.courses(scope);
-      if (activeStudyScope() !== scope) return;
-      studyCache = { ...studyCache, courses, at: Date.now() };
-      studyManualQueue = new Set(courses.map(courseKey));
-      studyRetryAt = 0;
-      studyAttempt = null;
-      studyMessage = courses.length ? '课程查询成功，会话已验证。' : '课程查询成功，该账号暂无课程。';
-      saveStudyCache();
+    const result = await Learning.scan(scope, {
+      course,
+      names,
+      semester: term?.term || '',
+      force: !automatic,
+      lastAt: studyCache.scanAt,
+      rest: studyCache.scan?.rest || {},
+      courses(courses) {
+        if (activeStudyScope() !== scope || course) return;
+        studyCache = { ...studyCache, courses, at: Date.now() };
+        studyConnection('verified');
+        saveStudyCache();
+        renderStudy();
+      },
+      full(item) {
+        const record = studyCache.updates[courseKey(item)];
+        return !!course || !automatic || ((!record?.reliable || StudyActivity.hiddenReason(record))
+          && StudyActivity.needsFullCheck(record, Date.now()));
+      },
+      capture(item, sections) {
+        if (activeStudyScope() !== scope) return;
+        const key = courseKey(item);
+        const at = Date.now();
+        const tagged = sections.map(section => ({ ...section, courseId: item.courseId, classId: item.classId }));
+        const merged = Learning.mergeCourseResults(studyCache.details[key], tagged, at);
+        for (const section of sections) if (!section.error) {
+          hasUsefulData = true;
+          sectionsRead[section.title] += section.items.length;
+        }
+        if (sections.some(section => section.error || section.complete === false)) failed++;
+        else checked++;
+        const work = sections.find(section => section.title === '作业');
+        const activities = sections.find(section => section.title === '活动');
+        scanChanges.set(key, { at, merged, sections, work, activities });
+      },
+      progress(scan) {
+        if (activeStudyScope() !== scope) return;
+        studyMessage = '正在检查学习通 · ' + (++processed) + '/' + (course ? 1 : studyCache.courses.length)
+          + (scan.phase ? ' · ' + scan.phase : '');
+        $('studyStatus').textContent = studyMessage;
+      }
+    });
+    if (!result || activeStudyScope() !== scope) return;
+    for (const [key, change] of scanChanges) {
+      const { at, merged, sections, work, activities } = change;
+      if (work && activities) studyCache.updates[key] = StudyActivity.update(studyCache.updates[key], sections, at);
+      else if (activities) studyCache.updates[key] = StudyActivity.observeActivities(studyCache.updates[key], activities, at);
+      studyCache.details[key] = merged.cache;
+      if (course) studyAttempt = { key, sections: merged.sections };
     }
     if (!course) {
-      const pending = batch || studyUpdateBatch();
-      if (pending.length) {
-        studyMessage = '正在检查课程更新…';
-        renderStudy();
-        const checked = await scanStudyUpdates(pending, scope);
-        if (activeStudyScope() !== scope) return;
-        studyMessage = checked ? '已检查 ' + checked + ' 门课程的通知与作业。' : '本次未确认课程更新。';
-      }
+      studyCache.scanAt = result.at * 1000;
+      studyCache.scan = { rest: result.rest, skipped: result.skipped, counts: result.counts,
+        failed: result.failed, paused: result.paused };
     }
-    if (native.cxPersist(scope)) studyMessage += ' 暂时无法保存登录状态。';
+    if (!course || hasUsefulData) studyConnection('verified');
+    studyAutoFailedAt = 0;
+    studyMessage = (course ? '课程任务检查完成' : '课程检查完成 · ' + checked + ' 门已读取'
+      + ' · 作业 ' + sectionsRead['作业'] + '、考试 ' + sectionsRead['考试'] + '、活动 ' + sectionsRead['活动'])
+      + (failed ? '，' + failed + ' 门部分未读全。' : '。');
+    if (result.persistError) studyMessage += ' 本次会话更新未保存。';
     saveStudyCache();
   } catch (error) {
+    if (activeStudyScope() !== scope) return;
     if (error.kind === 'auth') {
-      let cleared = true;
-      try {
-        native.cxInvalidate(scope);
-      } catch (failure) {
-        cleared = false;
-      }
-      const current = activeStudyScope();
-      if (studyCache.scope === scope && (!current || current === scope)) {
-        studyMessage = cleared ? '学习通会话已过期，请重新授权。' : '学习通会话已过期，本地登录状态清理失败。';
-        clearStudyCache();
-      }
-    } else if (activeStudyScope() === scope) {
-      if (error.kind === 'busy' || error.kind === 'net') studyRetryAt = Date.now() + 15 * 60 * 1000;
-      studyMessage = error.message + (studyCache.at ? '。下方保留上次结果。' : '');
-      saveStudyCache();
+      native.cxInvalidate(scope);
+      studyConnection('expired');
+      clearStudyCache();
+      studyMessage = '学习通会话已过期，请重新连接。';
+    } else {
+      if (automatic) studyAutoFailedAt = Date.now();
+      studyMessage = error.message + (studyCache.at ? '。保留上次可用结果。' : '');
     }
   } finally {
     studyBusy = false;
     refreshSession();
-    scheduleStudyUpdates(15000);
     if (course && studyCache.details[selectedCourse] && !$('page-study').hidden) {
       $('studyDetails').scrollIntoView({ block: 'nearest' });
     }
   }
 }
 
-function renderAccounts() {
-  const cx = native && native.cxHasLogin();
-  const water = native ? Water.state() : { accounts: {} };
-  $('studyAccount').textContent = cx ? '已登录' : '未连接';
-  $('studyAccountAction').textContent = cx ? '退出' : '前往登录';
-  $('studyAccountAction').disabled = studyBusy;
-  const accounts = water.accounts;
-  $('waterAccount').textContent = accounts.device && accounts.score ? '设备、积分均已登录'
-    : accounts.device ? '设备账号已登录' : accounts.score ? '积分账号已登录'
-      : water.state === 'broken' ? '会话已失效' : '未连接';
-  $('waterAccountAction').textContent = '管理';
-  $('clearWebCache').disabled = !native;
+function openAccounts() {
+  if (!$('page-accounts').hidden) return;
+  setAccountMessage('');
+  accountsReturn = tabs.find(button => button.getAttribute('aria-current') === 'page')?.dataset.tab || 'me';
+  select('accounts');
 }
+window.openServiceAccounts = openAccounts;
+
+let academicDisconnecting = false;
+let academicDisconnectTimer;
+function setAccountMessage(message) {
+  $('accountsStatus').textContent = message;
+  $('accountsStatus').hidden = !message;
+}
+
+async function disconnectAcademic() {
+  if (academicDisconnecting || schoolAuthorizing || portalPending || recordPending || schoolSync.snapshot().syncing) {
+    setAccountMessage('请等待当前教务查询结束。');
+    return;
+  }
+  if (!window.confirm('断开江财教务？已下载的课表会保留在本机，重新绑定后可查看。')) return;
+  academicDisconnecting = true;
+  renderAccounts();
+  if (native.disconnectAcademic()) {
+    academicDisconnectTimer = setTimeout(() => window.academicDisconnected('timeout'), 12000);
+  } else window.academicDisconnected('request');
+}
+
+window.academicDisconnected = function (error) {
+  if (!academicDisconnecting) return;
+  clearTimeout(academicDisconnectTimer);
+  try {
+    if (error) throw new Error('暂时无法断开教务，请稍后再试。');
+    schoolSync.disconnect();
+    schoolVerificationFailed = false;
+    recordRender++;
+    for (const key of Object.keys(recordViews)) delete recordViews[key];
+    for (const key of Object.keys(recordTerms)) delete recordTerms[key];
+    renderTermOptions($('term').value.startsWith(schoolPrefix) ? '' : $('term').value);
+    showSchoolStatus();
+    setAccountMessage('江财教务已断开。');
+  } catch (failure) {
+    setAccountMessage(failure.message);
+  } finally {
+    academicDisconnecting = false;
+    renderAccounts();
+  }
+};
+
+function disconnectStudy() {
+  if (!window.confirm('退出学习通并清除本机学习通缓存？')) return;
+  try {
+    native.cxClear();
+    studyConnection('disconnected');
+    clearStudyCache(true);
+    studyMessage = '已退出学习通。';
+    setAccountMessage(studyMessage);
+  } catch (_) {
+    setAccountMessage('无法清除学习通登录状态。');
+  }
+  refreshSession();
+}
+
+function renderAccounts() {
+  $('clearWebCache').disabled = !native;
+  if ($('page-accounts').hidden) return;
+  const school = schoolSync.snapshot();
+  const cx = !!activeStudyScope();
+  const water = native ? Water.state() : { state: 'unknown', accounts: {} };
+  const schoolState = ({ authorized: '已连接', unverified: '已绑定 · 会话待核验',
+    reauthorize: '会话过期', unbound: '未连接' })[school.state];
+  const connection = studyConnection();
+  const studyState = !native ? '状态未知' : cx
+    ? (studyCache.at || connection === 'verified' ? '已连接' : '已保存会话 · 待核验')
+    : connection === 'expired' ? '会话过期'
+      : ['saved', 'verified'].includes(connection) ? '状态未知' : '未连接';
+  const rows = [
+    { id: 'school', name: '江西财经大学教务', state: native ? schoolState : '状态未知',
+      connect: () => $('academicBind').click(), disconnect: school.accountKey ? disconnectAcademic : null,
+      busy: schoolAuthorizing || academicDisconnecting || school.syncing },
+    { id: 'study', name: '超星学习通', state: studyState,
+      connect: openStudyLogin, disconnect: cx ? disconnectStudy : null, busy: studyBusy },
+    ...['device', 'score'].map(kind => {
+      const account = water.accounts?.[kind];
+      const expired = WaterPage.expired(kind) || water.state === 'broken';
+      const phone = String(account?.phone || '');
+      const masked = /^\d{11}$/.test(phone) ? ' · ' + phone.slice(0, 3) + '****' + phone.slice(-4) : '';
+      return { id: 'water-' + kind, name: kind === 'device' ? '慧生活798 设备' : '慧生活798 积分',
+        state: (expired ? '会话过期' : account ? (WaterPage.verified(kind) ? '已连接' : '已保存会话')
+          : native ? '未连接' : '状态未知') + masked,
+        connect: () => WaterPage.login(kind), disconnect: account ? () => WaterPage.logout(kind) : null,
+        busy: WaterPage.busy(), disabled: !Water.configured() };
+    }),
+    { id: 'zhuli', name: '住理生活', state: '未接入酱菜通账号',
+      label: zhuli.status() === 'external-store' ? '查看官方应用' : '打开官方应用',
+      connect: () => zhuli.open(), disabled: zhuli.status() === 'unavailable' }
+  ];
+  const target = $('accountsList');
+  const focus = document.activeElement?.dataset.accountAction;
+  target.replaceChildren(...rows.map(row => {
+    const item = node('div', null, 'setting-row account-row');
+    const text = node('div', null, 'account-description');
+    text.append(node('h2', row.name), node('p', row.state, 'sub'));
+    const actions = node('div', null, 'account-actions');
+    const connect = node('button', row.label || (row.disconnect || row.state.startsWith('会话过期') ? '重连' : '连接'), 'btn');
+    connect.type = 'button';
+    connect.dataset.accountAction = row.id + '-connect';
+    connect.disabled = !native || !!row.busy || !!row.disabled;
+    connect.addEventListener('click', () => { setAccountMessage(''); row.connect(); });
+    actions.append(connect);
+    if (row.disconnect) {
+      const disconnect = node('button', '断开', 'btn');
+      disconnect.type = 'button';
+      disconnect.dataset.accountAction = row.id + '-disconnect';
+      disconnect.disabled = !!row.busy;
+      disconnect.addEventListener('click', row.disconnect);
+      actions.append(disconnect);
+    }
+    item.append(text, actions);
+    return item;
+  }));
+  if (focus) target.querySelector('[data-account-action="' + focus + '"]')?.focus({ preventScroll: true });
+}
+window.renderServiceAccounts = renderAccounts;
 
 function renderZhuli() {
   zhuliDevicePage.render();
@@ -725,27 +921,55 @@ uiTheme.addEventListener('change', () => {
 themeMedia.addEventListener?.('change', applyUiTheme);
 applyUiTheme();
 
-$('studyAccountAction').addEventListener('click', () => {
-  if (!native || !native.cxHasLogin()) {
-    select('study');
-    return;
-  }
-  if (!window.confirm('退出学习通并清除本机学习通缓存？')) return;
-  try {
-    native.cxClear();
-    clearStudyCache(true);
-    studyMessage = '已退出学习通。';
-  } catch (error) {
-    studyMessage = '无法清除学习通登录状态。';
-    toast(studyMessage);
-  }
-  refreshSession();
-});
+function closeStudyCredentials() {
+  if ($('studyCredentials').hidden) return false;
+  $('studyCredentials').hidden = true;
+  $('studyCredentialForm').reset();
+  return true;
+}
 
-$('waterAccountAction').addEventListener('click', () => {
-  selectLifeService('water');
-  select('life');
+async function submitStudyCredentials(saved) {
+  if (studyBusy) return;
+  const user = saved ? '' : $('studyUsername').value.trim();
+  const password = saved ? '' : $('studyPassword').value;
+  const remember = $('studyRemember').checked;
+  $('studyPassword').value = '';
+  studyBusy = true;
+  $('studyCredentialSubmit').disabled = $('studySavedLogin').disabled = $('studyOfficialLogin').disabled = true;
+  $('studyCredentialError').textContent = '正在连接学习通…';
+  renderAccounts();
+  try {
+    const result = await Learning.relink(user, password, remember);
+    if (!result) return;
+    reconcileStudyCache();
+    studyCache = { ...studyCache, courses: result.courses, at: Date.now(), scanAt: 0 };
+    studyConnection('verified');
+    saveStudyCache();
+    closeStudyCredentials();
+    setAccountMessage(result.saveError ? '学习通已连接。' + result.saveError : '学习通已连接。');
+  } catch (error) {
+    $('studyCredentialError').textContent = error.message;
+    $('studySavedLogin').hidden = !native.cxHasSavedLogin();
+  } finally {
+    studyBusy = false;
+    $('studyCredentialSubmit').disabled = $('studySavedLogin').disabled = $('studyOfficialLogin').disabled = false;
+    refreshSession();
+    scheduleStudyUpdates();
+  }
+}
+
+$('studyCredentialForm').addEventListener('submit', event => {
+  event.preventDefault();
+  submitStudyCredentials(false);
 });
+$('studySavedLogin').addEventListener('click', () => submitStudyCredentials(true));
+$('studyOfficialLogin').addEventListener('click', () => {
+  closeStudyCredentials();
+  openOfficialStudyLogin();
+});
+$('studyCredentialCancel').addEventListener('click', closeStudyCredentials);
+$('accountsOpen').addEventListener('click', openAccounts);
+$('accountsBack').addEventListener('click', () => select(accountsReturn));
 
 tabs.forEach(button => button.addEventListener('click', () => select(button.dataset.tab)));
 document.querySelectorAll('[data-life]').forEach(button => {
@@ -754,8 +978,34 @@ document.querySelectorAll('[data-life]').forEach(button => {
 $('zhuliOpen').addEventListener('click', () => {
   if (!zhuli.open()) toast('无法打开住理生活，请在应用商店搜索。');
 });
-$('studyLogin').addEventListener('click', openStudyLogin);
+$('studyLogin').addEventListener('click', openAccounts);
 $('studyRefresh').addEventListener('click', () => queryStudy(null));
+function renderFilteredStudyTasks() {
+  cxPaintTodo(studyCache.courses.filter(course => !StudyActivity.hiddenReason(studyCache.updates[courseKey(course)])));
+}
+$('studyTaskOrder').addEventListener('click', event => {
+  const grouped = studyFilter.order !== 'course';
+  studyFilter.order = grouped ? 'course' : 'urgent';
+  event.currentTarget.setAttribute('aria-pressed', String(grouped));
+  event.currentTarget.textContent = grouped ? '按紧急度排序' : '按课程分组';
+  renderFilteredStudyTasks();
+});
+function setStudyTaskState(state) {
+  studyFilter.state = state;
+  $('studyTaskState').querySelectorAll('[data-task-state]').forEach(button => {
+    button.setAttribute('aria-pressed', String(button.dataset.taskState === state));
+  });
+  renderFilteredStudyTasks();
+}
+$('studyTaskState').addEventListener('click', event => {
+  const button = event.target.closest('[data-task-state]');
+  if (button) setStudyTaskState(button.dataset.taskState);
+});
+$('studyKind').addEventListener('change', event => {
+  studyFilter.kind = event.target.value;
+  if (studyFilter.kind === 'notice') setStudyTaskState('all');
+  else renderFilteredStudyTasks();
+});
 $('sheetClose').addEventListener('click', closeCourseDetails);
 $('sheetMask').addEventListener('click', event => {
   if (event.target === $('sheetMask')) closeCourseDetails();
@@ -792,6 +1042,7 @@ function showSchoolStatus() {
     : state.state === 'reauthorize' ? '教务会话已失效，已保留本机课表。请主动重新绑定。'
     : state.state === 'unverified' ? '已显示本机课表，需要刷新时会核验教务会话。'
     : '请绑定教务，完成校方认证后同步本人课表。';
+  renderAccounts();
   if (academicPanel !== 'timetable') renderAcademicRecords();
 }
 
@@ -960,7 +1211,10 @@ $('recordBack').addEventListener('click', () => {
 $('recordPortal').addEventListener('click', () => { if (native) native.openAcademicBinding(); });
 
 function queueSchoolRead(action) {
-  const job = schoolReads.then(action);
+  const job = schoolReads.then(() => {
+    if (academicDisconnecting) throw new Error('教务正在断开');
+    return action();
+  });
   schoolReads = job.catch(() => {});
   return job;
 }
@@ -1023,13 +1277,14 @@ async function receiveSchoolAuthorization(restore, manual = false) {
     showSchoolStatus();
     return;
   }
-  if (schoolAuthorizing || portalPending || (restore && !manual
+  if (academicDisconnecting || schoolAuthorizing || portalPending || (restore && !manual
       && (schoolVerificationFailed || !schoolSync.needsRefresh()))) return;
   const saved = schoolSync.snapshot();
   if (restore && (saved.state !== 'unverified' || !navigator.onLine || !native.academicOnline())) return;
   schoolAuthorizing = true;
   $('academicBind').disabled = true;
   $('academicBindingState').textContent = restore ? '正在刷新本人课表…' : '请在校方窗口完成认证。';
+  renderAccounts();
   let previousTerm = '';
   try {
     const result = await requestSchoolPortal(restore ? saved.selected : '', !restore);
@@ -1065,10 +1320,12 @@ async function receiveSchoolAuthorization(restore, manual = false) {
       renderTermOptions(selected ? schoolPrefix + selected : '');
     }
     $('academicBindingState').textContent = error.message;
+    if (!$('page-accounts').hidden) setAccountMessage(error.message);
     if (academicPanel !== 'timetable') renderAcademicRecords();
   } finally {
     schoolAuthorizing = false;
     $('academicBind').disabled = false;
+    renderAccounts();
   }
 }
 
@@ -1275,4 +1532,4 @@ Academic.mockAdapter.listTerms().then(terms => {
   renderTermOptions(saved ? schoolPrefix + saved : '');
   if (!saved) showSchoolStatus();
 });
-scheduleStudyUpdates(1500);
+scheduleStudyUpdates();

@@ -19,6 +19,7 @@ import org.json.JSONObject;
 
 /** A read-only refresh in the isolated academic profile, with no authentication UI. */
 public final class AcademicSyncService extends Service {
+    static final String DISCONNECT = "com.jxufe.jct.DISCONNECT_ACADEMIC";
     private static final String TAG = "JctAcademic";
     private static final String PORTAL_HOME = "https://jwxt.jxufe.edu.cn/frame/homes.action";
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -34,6 +35,7 @@ public final class AcademicSyncService extends Service {
     private String recordPhase;
     private int document;
     private boolean navigated;
+    private boolean clearingSession;
 
     @Override public IBinder onBind(Intent intent) { return null; }
 
@@ -50,8 +52,22 @@ public final class AcademicSyncService extends Service {
             if (receiver == null) stopSelf();
             return START_NOT_STICKY;
         }
-        if (receiver != null) {
+        if (receiver != null || clearingSession) {
             send(callback, null, "busy");
+            return START_NOT_STICKY;
+        }
+        if (DISCONNECT.equals(intent.getAction())) {
+            clearingSession = true;
+            CookieManager cookies = CookieManager.getInstance();
+            cookies.removeAllCookies(removed -> {
+                cookies.flush();
+                android.webkit.WebStorage storage = android.webkit.WebStorage.getInstance();
+                storage.deleteOrigin("https://" + AcademicActivity.ACADEMIC);
+                storage.deleteOrigin("https://" + AcademicActivity.AUTH);
+                clearingSession = false;
+                send(callback, null, "");
+                stopSelf();
+            });
             return START_NOT_STICKY;
         }
         receiver = callback;

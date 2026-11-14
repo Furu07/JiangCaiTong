@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-当前构建为 0.8.9 Debug。Android 9 及以上支持独立教务授权和后台查询。会话失效时保留已有课表，由用户主动重新绑定。
+当前构建为 0.9.1 Debug。Android 9 及以上支持独立教务授权和后台查询。会话失效时保留已有课表，由用户主动重新绑定。服务账号集中在「我的 → 账号管理」。
 
 | 入口 | 已实现 | 验证范围 |
 | --- | --- | --- |
@@ -23,10 +23,10 @@
 py -3.12 android/build_apk.py
 ```
 
-脚本从 `ANDROID_HOME`、`ANDROID_SDK_ROOT` 或系统默认位置查找 Android SDK，从 `JAVA_HOME` 或 `PATH` 查找 JDK。首次构建会生成独立的本地 Debug 签名密钥。输出为 `android/dist/JiangCaiTong-0.8.9-debug.apk`。获授权的本地构建使用项目根目录或用户下载目录中经 SHA-256 核验的航院通 0.52.0 `base.apk`，构建产物仅供授权范围内使用。安装到已连接且已授权的测试设备可执行以下命令。
+脚本从 `ANDROID_HOME`、`ANDROID_SDK_ROOT` 或系统默认位置查找 Android SDK，从 `JAVA_HOME` 或 `PATH` 查找 JDK。首次构建会生成独立的本地 Debug 签名密钥。输出为 `android/dist/JiangCaiTong-0.9.1-debug.apk`。获授权的本地构建使用项目根目录或用户下载目录中经 SHA-256 核验的航院通 0.52.0 `base.apk`，构建产物仅供授权范围内使用。安装到已连接且已授权的测试设备可执行以下命令。
 
 ```powershell
-adb install -r android/dist/JiangCaiTong-0.8.9-debug.apk
+adb install -r android/dist/JiangCaiTong-0.9.1-debug.apk
 ```
 
 ## 源码
